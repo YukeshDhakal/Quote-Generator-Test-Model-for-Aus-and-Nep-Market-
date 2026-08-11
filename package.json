@@ -1,0 +1,12 @@
+{
+  "name": "quote-engine",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace=@quote-engine/engine",
+    "dev:web": "npm run dev --workspace=@quote-engine/web",
+    "dev:api": "npm run dev --workspace=@quote-engine/api"
+  }
+}

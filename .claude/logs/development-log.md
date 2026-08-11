@@ -1,0 +1,50 @@
+# Development Log
+
+One line per completed milestone. Append, don't rewrite. Read the tail
+unless you need history.
+
+- 2026-08-10 — Engine scaffolded: domain model, AU/NP profiles, calculation
+  engine (step-registry driven), 19 golden tests vs real AUQU0085/AUQU0086/
+  R.K.Trading documents. All passing.
+- 2026-08-10 — React+Vite+framer-motion web app scaffolded, engine wired in
+  via workspace link, verified in browser.
+- 2026-08-10 — Backend added: Express + `node:sqlite` (better-sqlite3
+  failed, no native toolchain — see discoveries.md), Quote CRUD, PDF
+  export via Puppeteer, business branding settings.
+- 2026-08-10/11 — Full auth + multi-tenancy pivot: users/businesses tables,
+  bcryptjs + JWT sessions, Google Sign-In, every table business-scoped,
+  cross-tenant isolation verified (404 on direct-ID access, not just list
+  filtering).
+- 2026-08-11 — Tailwind v4 + shadcn/ui (Base UI) frontend rebuild: login/
+  signup, sidebar app shell, dashboard, all pages re-skinned. Fixed shadcn
+  CLI monorepo alias bug (see decisions.md).
+- 2026-08-11 — Marketing landing page (dark, bold typography, inspired by
+  nudot.com.tw reference but simplified per "as minimalistic as possible").
+  Auth pages restyled to match (same dark theme, animated glow background).
+- 2026-08-11 — Google Client ID configured and wired end-to-end (button
+  renders; full OAuth click-through not yet tested — that's the user's own
+  Google account).
+- 2026-08-11 — Edit Quote feature added (PUT endpoints, jurisdiction locked
+  post-creation, shared `QuoteForm` component). Found and fixed a real bug
+  via the user's own testing: percent-discount unit mismatch causing a
+  negative total (see decisions.md).
+- 2026-08-11 — Business jurisdiction lock + multi-business-profile
+  switching, per user's "a business is registered in one place" framing.
+  Jurisdiction removed from client-supplied quote-create payload entirely.
+- 2026-08-11 — Dashboard rewritten per Claude Design canvas import: first
+  attempt was "2b Jurisdiction-first," user redirected to "2a Ledger"
+  (hairline stat rail + inverted jurisdiction band + account dropdown in
+  AppShell). Responsive line-item table (1e) added to quote detail.
+  Code complete, browser re-verification pending as of this entry.
+- 2026-08-11 — `.claude/` state system created (this file, skills/,
+  state/, CLAUDE.md) — leaner than the user's original spec, reusing
+  native Claude Code skills/tasks instead of reimplementing them as files.
+- 2026-08-11 — Dashboard: user redirected from "2a only" to "combine 2a +
+  2b content on one page" mid-build; merged hairline stat rail + account
+  dropdown (2a) with the richer per-jurisdiction object card (2b). Live
+  browser verification found and fixed two real Base UI bugs (see
+  discoveries.md: DropdownMenuLabel/Group crash, onSelect vs onClick).
+  Business-profile create+switch flow confirmed working via the user's own
+  parallel testing (they created a second "Aussie Trading" AU profile
+  independently). Full regression (19 engine tests + both typechecks)
+  green at end of session.
