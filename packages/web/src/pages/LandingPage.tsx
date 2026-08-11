@@ -61,7 +61,11 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
   const closingCta = useCurveReveal<HTMLDivElement>()
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-zinc-950 text-zinc-50">
+    // overflow-x-clip, not overflow-x-hidden: "hidden" establishes a scroll container per the
+    // CSS overflow spec, which breaks position:sticky on the nav below (it stops pinning against
+    // the real viewport and just scrolls away with the page). "clip" still contains the hero's
+    // decorative ghost-plate bleed without that side effect.
+    <div className="relative min-h-screen overflow-x-clip bg-zinc-950 text-zinc-50">
       {/* Ambient glow — scoped to the top of the page, not per-section */}
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-[1200px] opacity-45"
