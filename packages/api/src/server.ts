@@ -31,6 +31,7 @@ import {
   listBusinessesForOwner,
   sessionCookieName,
   sessionCookieOptions,
+  clearSessionCookieOptions,
   signSession,
   verifyGoogleCredential,
   verifyPassword,
@@ -203,7 +204,7 @@ app.post('/api/auth/google', async (req, res) => {
 });
 
 app.post('/api/auth/logout', (_req, res) => {
-  res.clearCookie(sessionCookieName);
+  res.clearCookie(sessionCookieName, clearSessionCookieOptions);
   res.status(204).end();
 });
 

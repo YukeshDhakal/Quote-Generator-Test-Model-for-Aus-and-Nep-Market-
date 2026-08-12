@@ -52,6 +52,17 @@ export const sessionCookieOptions = {
   maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
 
+// Browsers refuse to let a non-Secure/mismatched-SameSite Set-Cookie clear a cookie that was
+// set with Secure/SameSite=None (the "leave secure cookies alone" policy) — clearCookie() must
+// echo the same httpOnly/sameSite/secure attributes, without maxAge (Express recomputes
+// `expires` from maxAge on any res.cookie() call, including the one clearCookie() makes
+// internally, which would silently turn a "clear" into a 30-day-future re-set).
+export const clearSessionCookieOptions = {
+  httpOnly: sessionCookieOptions.httpOnly,
+  sameSite: sessionCookieOptions.sameSite,
+  secure: sessionCookieOptions.secure,
+};
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
