@@ -92,11 +92,11 @@ export function JurisdictionDetail() {
                 <span className="tabular-nums text-zinc-200">{formatAmount(example.totals.taxAmount, profile)}</span>
               </div>
               <div className="my-3 h-px bg-white/15" />
-              <div className="flex items-end justify-between">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                 <p className="font-mono text-[9.5px] tracking-[0.16em] text-zinc-500 uppercase">
                   {example.labels.grandTotalLabel}
                 </p>
-                <p className="text-[24px] font-semibold tracking-[-0.03em] tabular-nums">
+                <p className="text-[24px] font-semibold tracking-[-0.03em] tabular-nums whitespace-nowrap">
                   {formatAmount(example.totals.grandTotal, profile)}
                 </p>
               </div>
