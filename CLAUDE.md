@@ -44,7 +44,10 @@ engine — never independently authored — so they can't contradict each other.
 - Never commit `.env`, the SQLite db, or `data/uploads/`.
 - Passwords: bcryptjs only. Sessions: httpOnly JWT cookie, secret in
   `packages/api/data/.session-secret` (gitignored, generated on first run).
-- No git repo initialized yet in this project as of 2026-08-11.
+- Git repo is initialized, remote `origin` is
+  `github.com/YukeshDhakal/Quote-Generator-Test-Model-for-Aus-and-Nep-Market-`,
+  branch `main`. Commit and push after every meaningful change — don't let
+  work sit local-only across turns.
 
 ## How this project's `.claude/` is organized
 
