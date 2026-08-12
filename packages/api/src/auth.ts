@@ -38,16 +38,18 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
-// Web and API are deployed on separate domains (e.g. Vercel + Fly.io), so the session cookie
-// must be sent cross-site: that requires SameSite=None, which browsers only honor alongside
-// Secure. Local dev runs both over plain http on the same-site localhost, where Secure cookies
-// would silently not be set at all — so this only applies in production.
+// Web (www.quoteengine.dev) and API (api.quoteengine.dev) are on different subdomains of the
+// same registrable domain, which browsers treat as "same-site" — so SameSite=Lax is sent on
+// cross-subdomain fetches and isn't subject to third-party-cookie blocking (Safari ITP, Brave,
+// Chrome's rollout), unlike the SameSite=None this used before the API moved off *.fly.dev.
+// Secure still requires HTTPS, which prod always is; local dev runs both over plain http on
+// localhost, where a Secure cookie would silently not be set at all.
 const isProduction = process.env.NODE_ENV === 'production';
 
 export const sessionCookieName = SESSION_COOKIE;
 export const sessionCookieOptions = {
   httpOnly: true,
-  sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+  sameSite: 'lax' as const,
   secure: isProduction,
   maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
