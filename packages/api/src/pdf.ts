@@ -181,7 +181,15 @@ let browserPromise: Promise<Browser> | null = null;
 
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = puppeteer.launch({ headless: true });
+    // The container runs as root (no USER directive in the Dockerfile), and Chromium refuses to
+    // start sandboxed as root - without --no-sandbox this rejects with "Failed to launch the
+    // browser process! Running as root without --no-sandbox is not supported" on every attempt.
+    browserPromise = puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browserPromise.catch(() => {
+      // Don't let a launch failure permanently wedge PDF generation - without this, the first
+      // failed attempt caches the rejected promise forever and every later call reuses it.
+      browserPromise = null;
+    });
   }
   return browserPromise;
 }
