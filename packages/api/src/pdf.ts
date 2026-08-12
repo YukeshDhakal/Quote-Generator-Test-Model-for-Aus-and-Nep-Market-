@@ -184,7 +184,16 @@ function getBrowser(): Promise<Browser> {
     // The container runs as root (no USER directive in the Dockerfile), and Chromium refuses to
     // start sandboxed as root - without --no-sandbox this rejects with "Failed to launch the
     // browser process! Running as root without --no-sandbox is not supported" on every attempt.
-    browserPromise = puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    // --disable-dev-shm-usage is also required here: Docker's default /dev/shm is only 64MB,
+    // too small for Chromium's rendering process, which made page.setContent() hang until
+    // Puppeteer's own 30s navigation timeout instead of failing fast - confirmed live by timing
+    // a direct request (72s wall time, "Timed out after waiting 30000ms") after --no-sandbox
+    // alone let the browser launch but not actually render. This flag makes Chromium use /tmp
+    // for shared memory instead.
+    browserPromise = puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
     browserPromise.catch(() => {
       // Don't let a launch failure permanently wedge PDF generation - without this, the first
       // failed attempt caches the rejected promise forever and every later call reuses it.
