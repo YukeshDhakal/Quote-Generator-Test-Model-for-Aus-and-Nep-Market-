@@ -1,6 +1,7 @@
 import type { Discount, DocumentTypeDef, JurisdictionProfile, LineItem, QuoteResult } from '@quote-engine/engine'
 
-const API_BASE = 'http://localhost:5187/api'
+export const API_ORIGIN = (import.meta.env?.VITE_API_URL as string | undefined) || 'http://localhost:5187'
+const API_BASE = `${API_ORIGIN}/api`
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

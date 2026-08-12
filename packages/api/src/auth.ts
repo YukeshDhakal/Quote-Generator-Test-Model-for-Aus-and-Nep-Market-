@@ -38,10 +38,17 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
+// Web and API are deployed on separate domains (e.g. Vercel + Fly.io), so the session cookie
+// must be sent cross-site: that requires SameSite=None, which browsers only honor alongside
+// Secure. Local dev runs both over plain http on the same-site localhost, where Secure cookies
+// would silently not be set at all — so this only applies in production.
+const isProduction = process.env.NODE_ENV === 'production';
+
 export const sessionCookieName = SESSION_COOKIE;
 export const sessionCookieOptions = {
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+  secure: isProduction,
   maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
 

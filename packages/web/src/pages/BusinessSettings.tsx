@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  API_ORIGIN,
   createBusinessProfile,
   getBusiness,
   listBusinesses,
@@ -17,7 +18,6 @@ import {
   type BusinessProfile,
 } from '../api'
 
-const API_ORIGIN = 'http://localhost:5187'
 const JURISDICTIONS: Record<string, string> = { AU: 'Australia (GST)', NP: 'Nepal (VAT)' }
 
 // Every seller identifier across the jurisdictions this business might quote in (v1: AU, NP).
