@@ -1,0 +1,12 @@
+# Quote Engine
+
+> Quotation template generator with jurisdiction-correct GST/VAT calculation. Tax treatment is modeled as data (a jurisdiction profile), not hand-typed prose, so the tax label and the total always agree. Australia and Nepal are live today, with more countries planned.
+
+## Pages
+
+- [Home](https://www.quoteengine.dev/): Generate branded GST or VAT quotation templates where the tax label and the total always agree.
+- [What We Do](https://www.quoteengine.dev/what-we-do): Create GST or VAT quotation templates with correct tax math every time — branded PDF quotes for Australia and Nepal.
+- [Jurisdictions](https://www.quoteengine.dev/jurisdictions): Jurisdiction-specific quote templates by country, showing tax rate, date format, and numbering rules per country.
+- [Australia](https://www.quoteengine.dev/jurisdictions/australia): GST-compliant quote templates for Australia — GST shown inside the price, Gregorian dates, ABN on every quote.
+- [Nepal](https://www.quoteengine.dev/jurisdictions/nepal): VAT quotation formats for Nepal — VAT added on top, Bikram Sambat dates, lakh/crore number grouping, PAN on every quote.
+- [Roadmap](https://www.quoteengine.dev/roadmap): What's live, what's planned, and what's deliberately not on the roadmap.
