@@ -1,0 +1,36 @@
+{
+  "live": [
+    {
+      "code": "AU",
+      "slug": "australia",
+      "name": "Australia",
+      "status": "live",
+      "currency": { "code": "AUD", "symbol": "$" },
+      "tax": { "label": "GST", "rate": 0.1, "basis": "inclusive" },
+      "calendar": { "system": "gregorian", "format": "DD/MM/YYYY" },
+      "numerals": { "grouping": "western" },
+      "identifier": { "key": "ABN", "label": "ABN" },
+      "documentTypes": ["Quote"],
+      "summary": "shown inside the price"
+    },
+    {
+      "code": "NP",
+      "slug": "nepal",
+      "name": "Nepal",
+      "status": "live",
+      "currency": { "code": "NPR", "symbol": "रू" },
+      "tax": { "label": "VAT", "rate": 0.13, "basis": "exclusive" },
+      "calendar": { "system": "bikram_sambat", "format": "YYYY/MM/DD" },
+      "numerals": { "grouping": "lakh_crore" },
+      "identifier": { "key": "PAN", "label": "PAN" },
+      "documentTypes": ["Quotation", "Estimate"],
+      "summary": "added on top"
+    }
+  ],
+  "planned": [
+    { "code": "NZ", "slug": "new-zealand", "name": "New Zealand", "status": "planned" },
+    { "code": "SG", "slug": "singapore", "name": "Singapore", "status": "planned" },
+    { "code": "GB", "slug": "united-kingdom", "name": "United Kingdom", "status": "planned" },
+    { "code": "DK", "slug": "denmark", "name": "Denmark", "status": "planned" }
+  ]
+}

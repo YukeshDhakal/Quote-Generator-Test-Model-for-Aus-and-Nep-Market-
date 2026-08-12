@@ -1,5 +1,19 @@
-import { NepaliDate } from 'nepali-date-library'
+// Namespace import with a defensive fallback cascade — see BikramSambatDatePicker.tsx for why
+// (this package's CJS/ESM interop shape differs across Vite dev, the client build, and the SSR
+// prerender build; a namespace import resolves in all three, and the app is statically imported
+// as part of the router config, so this code runs during SSR even though QuoteList itself never
+// renders there).
+import * as nepaliDateLibraryNs from 'nepali-date-library'
+import type { NepaliDate as NepaliDateClass } from 'nepali-date-library'
 import { financialYearStart, type JurisdictionProfile } from '@quote-engine/engine'
+
+function resolveNepaliDateClass(): typeof NepaliDateClass {
+  const ns = nepaliDateLibraryNs as unknown as Record<string, unknown>
+  const fromDefault = ns.default as Record<string, unknown> | undefined
+  return (ns.NepaliDate ?? fromDefault?.NepaliDate ?? ns.default) as typeof NepaliDateClass
+}
+
+const NepaliDate = resolveNepaliDateClass()
 
 export type RangePreset = 'all' | '7d' | '30d' | 'month' | 'fy' | 'custom'
 

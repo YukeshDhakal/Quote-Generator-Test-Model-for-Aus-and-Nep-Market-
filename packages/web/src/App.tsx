@@ -1,128 +1,100 @@
-import { useState } from 'react'
-import { AnimatePresence } from 'framer-motion'
-import { AppShell, type AppView } from './components/AppShell'
+import type { ReactNode } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { AppShell } from './components/AppShell'
 import { AuthPage } from './pages/AuthPage'
 import { BusinessSettings } from './pages/BusinessSettings'
 import { Dashboard } from './pages/Dashboard'
 import { EditQuote } from './pages/EditQuote'
+import { JurisdictionDetail } from './pages/JurisdictionDetail'
+import { JurisdictionsIndex } from './pages/JurisdictionsIndex'
 import { LandingPage } from './pages/LandingPage'
 import { NewQuote } from './pages/NewQuote'
 import { QuoteDetail } from './pages/QuoteDetail'
 import { QuoteList } from './pages/QuoteList'
+import { Roadmap } from './pages/Roadmap'
+import { WhatWeDo } from './pages/WhatWeDo'
 import { AuthProvider, useAuth } from './lib/auth-context'
 
-type PublicView = { name: 'landing' } | { name: 'login' } | { name: 'signup' }
-
-type View =
-  | { section: 'dashboard' }
-  | { section: 'quotes'; sub: 'list' }
-  | { section: 'quotes'; sub: 'new' }
-  | { section: 'quotes'; sub: 'detail'; id: string }
-  | { section: 'quotes'; sub: 'edit'; id: string }
-  | { section: 'settings' }
-
-function initialView(): View {
-  // The app has no general router — every other section resets to Dashboard on reload. Quotes
-  // is the one screen whose filter state is meant to survive a reload/share (see QuoteList's
-  // URL sync), so a `view=quotes` marker in the URL restores that specific screen on load.
-  if (new URLSearchParams(window.location.search).get('view') === 'quotes') {
-    return { section: 'quotes', sub: 'list' }
-  }
-  return { section: 'dashboard' }
+function LoadingScreen() {
+  return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>
 }
 
-function AppRoot() {
+/** Gates the authenticated app. Public marketing routes never use this — they must render
+ * immediately regardless of auth state (including during SSR prerendering, where `loading`
+ * never resolves at all since effects don't run server-side). */
+function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
-  const [view, setView] = useState<View>(initialView)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [publicView, setPublicView] = useState<PublicView>({ name: 'landing' })
+  if (loading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
 
-  if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>
-  }
+function HomeRoute() {
+  const { user, loading } = useAuth()
+  if (loading) return <LoadingScreen />
+  if (user) return <Navigate to="/dashboard" replace />
+  return <LandingPage />
+}
 
-  if (!user) {
-    if (publicView.name === 'landing') {
-      return (
-        <LandingPage
-          onSignIn={() => setPublicView({ name: 'login' })}
-          onGetStarted={() => setPublicView({ name: 'signup' })}
-        />
-      )
-    }
-    return (
-      <AuthPage
-        initialMode={publicView.name}
-        onBack={() => setPublicView({ name: 'landing' })}
-      />
-    )
-  }
+function RedirectIfAuthed({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth()
+  if (loading) return <LoadingScreen />
+  if (user) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
 
-  const activeSection: AppView = view.section
-
-  function navigate(section: AppView) {
-    if (section === 'quotes') setView({ section: 'quotes', sub: 'list' })
-    else setView({ section })
-  }
-
+function AppRoutes() {
   return (
-    <AppShell active={activeSection} onNavigate={navigate}>
-      <AnimatePresence mode="wait">
-        {view.section === 'dashboard' && (
-          <Dashboard
-            key="dashboard"
-            onNewQuote={() => setView({ section: 'quotes', sub: 'new' })}
-            onSelectQuote={(id) => setView({ section: 'quotes', sub: 'detail', id })}
-            onGoToQuotes={() => setView({ section: 'quotes', sub: 'list' })}
-            onGoToSettings={() => setView({ section: 'settings' })}
-          />
-        )}
-        {view.section === 'quotes' && view.sub === 'list' && (
-          <QuoteList
-            key="quotes-list"
-            refreshKey={refreshKey}
-            onSelect={(id) => setView({ section: 'quotes', sub: 'detail', id })}
-            onNew={() => setView({ section: 'quotes', sub: 'new' })}
-          />
-        )}
-        {view.section === 'quotes' && view.sub === 'new' && (
-          <NewQuote
-            key="quotes-new"
-            onCreated={(id) => {
-              setRefreshKey((k) => k + 1)
-              setView({ section: 'quotes', sub: 'detail', id })
-            }}
-            onGoToSettings={() => setView({ section: 'settings' })}
-          />
-        )}
-        {view.section === 'quotes' && view.sub === 'detail' && (
-          <QuoteDetail
-            key={view.id}
-            quoteId={view.id}
-            onBack={() => setView({ section: 'quotes', sub: 'list' })}
-            onEdit={(id) => setView({ section: 'quotes', sub: 'edit', id })}
-          />
-        )}
-        {view.section === 'quotes' && view.sub === 'edit' && (
-          <EditQuote
-            key={`edit-${view.id}`}
-            quoteId={view.id}
-            onSaved={(id) => {
-              setRefreshKey((k) => k + 1)
-              setView({ section: 'quotes', sub: 'detail', id })
-            }}
-          />
-        )}
-        {view.section === 'settings' && <BusinessSettings key="settings" />}
-      </AnimatePresence>
-    </AppShell>
+    <Routes>
+      {/* Public marketing pages — accessible regardless of auth state */}
+      <Route path="/what-we-do" element={<WhatWeDo />} />
+      <Route path="/jurisdictions" element={<JurisdictionsIndex />} />
+      <Route path="/jurisdictions/:slug" element={<JurisdictionDetail />} />
+      <Route path="/roadmap" element={<Roadmap />} />
+
+      <Route path="/" element={<HomeRoute />} />
+      <Route
+        path="/login"
+        element={
+          <RedirectIfAuthed>
+            <AuthPage initialMode="login" />
+          </RedirectIfAuthed>
+        }
+      />
+      <Route
+        path="/signup"
+        element={
+          <RedirectIfAuthed>
+            <AuthPage initialMode="signup" />
+          </RedirectIfAuthed>
+        }
+      />
+
+      {/* Authenticated app */}
+      <Route
+        element={
+          <RequireAuth>
+            <AppShell />
+          </RequireAuth>
+        }
+      >
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/quotes" element={<QuoteList />} />
+        <Route path="/quotes/new" element={<NewQuote />} />
+        <Route path="/quotes/:id" element={<QuoteDetail />} />
+        <Route path="/quotes/:id/edit" element={<EditQuote />} />
+        <Route path="/settings" element={<BusinessSettings />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
 function App() {
   return (
     <AuthProvider>
-      <AppRoot />
+      <AppRoutes />
     </AuthProvider>
   )
 }

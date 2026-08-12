@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -84,12 +85,12 @@ function useGoogleSignIn(onCredential: (credential: string) => void) {
 
 interface AuthPageProps {
   initialMode?: 'login' | 'signup'
-  onBack?: () => void
 }
 
-export function AuthPage({ initialMode = 'login', onBack }: AuthPageProps) {
+export function AuthPage({ initialMode = 'login' }: AuthPageProps) {
   const { refresh } = useAuth()
-  const [mode, setMode] = useState<'login' | 'signup'>(initialMode)
+  const navigate = useNavigate()
+  const mode = initialMode
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -132,14 +133,9 @@ export function AuthPage({ initialMode = 'login', onBack }: AuthPageProps) {
 
       <header className="relative z-10 border-b border-white/10">
         <div className="mx-auto flex h-16 max-w-6xl items-center px-6">
-          <button
-            type="button"
-            onClick={onBack}
-            className={onBack ? 'cursor-pointer' : 'cursor-default'}
-            aria-label="Back to home"
-          >
+          <Link to="/" aria-label="Back to home">
             <Logo size={22} />
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -250,7 +246,7 @@ export function AuthPage({ initialMode = 'login', onBack }: AuthPageProps) {
               <button
                 type="button"
                 className="font-medium text-primary underline-offset-4 hover:underline"
-                onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
+                onClick={() => navigate(mode === 'login' ? '/signup' : '/login')}
               >
                 {mode === 'login' ? 'Sign up' : 'Sign in'}
               </button>

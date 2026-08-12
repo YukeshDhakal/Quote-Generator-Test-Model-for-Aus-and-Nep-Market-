@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import { AU_PROFILE, NP_PROFILE, formatAmount, type JurisdictionProfile } from '@quote-engine/engine'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -8,16 +9,10 @@ import { getDashboard, type DashboardData } from '../api'
 const PROFILES: Record<string, JurisdictionProfile> = { AU: AU_PROFILE, NP: NP_PROFILE }
 const COUNTRY_NAMES: Record<string, string> = { AU: 'Australia', NP: 'Nepal' }
 
-interface DashboardProps {
-  onNewQuote: () => void
-  onSelectQuote: (id: string) => void
-  onGoToQuotes: () => void
-  onGoToSettings: () => void
-}
-
 const MONTH_YEAR = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
-export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSettings }: DashboardProps) {
+export function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
 
   useEffect(() => {
@@ -36,7 +31,7 @@ export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSetti
           Your dashboard is organised around the jurisdiction your business operates in. Pick one in Business
           Settings to get started.
         </p>
-        <Button onClick={onGoToSettings}>Go to Business Settings</Button>
+        <Button onClick={() => navigate('/settings')}>Go to Business Settings</Button>
       </div>
     )
   }
@@ -58,7 +53,7 @@ export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSetti
           <p className="font-mono text-xs tracking-[0.2em] text-muted-foreground uppercase">Overview · {MONTH_YEAR}</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">Quotes computed.</h1>
         </div>
-        <Button onClick={onNewQuote}>+ New quote</Button>
+        <Button onClick={() => navigate('/quotes/new')}>+ New quote</Button>
       </div>
 
       {/* Hairline stat rail — no card chrome, just dividers. Mobile-first: one column stacked,
@@ -153,7 +148,7 @@ export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSetti
 
         <div className="flex items-center justify-between border-t px-5 py-3 font-mono text-xs text-muted-foreground">
           <span>{data.nextNumber ? `Next: ${data.nextNumber}` : ''}</span>
-          <Button variant="outline" size="sm" onClick={onGoToSettings}>
+          <Button variant="outline" size="sm" onClick={() => navigate('/settings')}>
             Manage profiles
           </Button>
         </div>
@@ -162,7 +157,11 @@ export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSetti
       <div className="pt-6">
         <div className="flex items-baseline justify-between pb-3">
           <span className="font-mono text-xs tracking-[0.2em] text-muted-foreground uppercase">Recent quotes</span>
-          <button type="button" onClick={onGoToQuotes} className="text-xs text-muted-foreground hover:text-foreground">
+          <button
+            type="button"
+            onClick={() => navigate('/quotes')}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
             View all →
           </button>
         </div>
@@ -181,7 +180,7 @@ export function Dashboard({ onNewQuote, onSelectQuote, onGoToQuotes, onGoToSetti
             </TableHeader>
             <TableBody>
               {data.recentQuotes.map((q) => (
-                <TableRow key={q.id} className="cursor-pointer" onClick={() => onSelectQuote(q.id)}>
+                <TableRow key={q.id} className="cursor-pointer" onClick={() => navigate(`/quotes/${q.id}`)}>
                   <TableCell className="font-mono text-xs">{q.quoteNumber}</TableCell>
                   <TableCell className="font-medium">{q.customerName}</TableCell>
                   <TableCell className="text-muted-foreground">{q.documentTypeTitle}</TableCell>

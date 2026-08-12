@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, FileText, LayoutDashboard, LogOut, Settings } from 'lucide-react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -24,22 +25,15 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { SiteNav } from './SiteNav'
 import { Logo } from './Logo'
 import { getBusiness, type BusinessSettings } from '../api'
 import { useAuth } from '../lib/auth-context'
 
-export type AppView = 'dashboard' | 'quotes' | 'settings'
-
-interface AppShellProps {
-  active: AppView
-  onNavigate: (view: AppView) => void
-  children: ReactNode
-}
-
-const NAV_ITEMS: { key: AppView; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'quotes', label: 'Quotes', icon: FileText },
-  { key: 'settings', label: 'Business settings', icon: Settings },
+const NAV_ITEMS = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/quotes', label: 'Quotes', icon: FileText },
+  { href: '/settings', label: 'Business settings', icon: Settings },
 ]
 
 const JURISDICTION_LABELS: Record<string, string> = { AU: 'GST 10%', NP: 'VAT 13%' }
@@ -54,8 +48,10 @@ function initials(name: string | null, email: string) {
     .toUpperCase()
 }
 
-export function AppShell({ active, onNavigate, children }: AppShellProps) {
+export function AppShell() {
   const { user, business, logout } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [settings, setSettings] = useState<BusinessSettings | null>(null)
 
   useEffect(() => {
@@ -67,6 +63,11 @@ export function AppShell({ active, onNavigate, children }: AppShellProps) {
   const jurisdictionLine = settings?.jurisdiction
     ? `${settings.jurisdiction} · ${JURISDICTION_LABELS[settings.jurisdiction] ?? ''}`
     : 'No jurisdiction set'
+
+  async function handleLogout() {
+    await logout()
+    navigate('/')
+  }
 
   return (
     <SidebarProvider>
@@ -81,8 +82,11 @@ export function AppShell({ active, onNavigate, children }: AppShellProps) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton isActive={active === item.key} onClick={() => onNavigate(item.key)}>
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      isActive={location.pathname === item.href || location.pathname.startsWith(`${item.href}/`)}
+                      render={<Link to={item.href} />}
+                    >
                       <item.icon />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
@@ -98,60 +102,66 @@ export function AppShell({ active, onNavigate, children }: AppShellProps) {
       </Sidebar>
 
       <SidebarInset>
-        <header className="flex h-14 items-center justify-between border-b px-4">
-          <SidebarTrigger />
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg border px-2 py-1.5 pl-3 outline-none hover:bg-muted/50">
-              <div className="text-right text-sm leading-tight">
-                <div className="font-medium">{user?.name || user?.email}</div>
-                <div className="font-mono text-[10.5px] text-muted-foreground">{business?.name}</div>
-              </div>
-              <Avatar className="h-8 w-8">
-                <AvatarFallback>{user ? initials(user.name, user.email) : '?'}</AvatarFallback>
-              </Avatar>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72">
-              <div className="flex items-center gap-2.5 px-2 py-1.5">
-                <Avatar className="h-9 w-9">
+        <SiteNav
+          variant="app"
+          showLogo={false}
+          leftSlot={<SidebarTrigger />}
+          right={
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg border px-2 py-1.5 pl-3 outline-none hover:bg-muted/50">
+                <div className="text-right text-sm leading-tight">
+                  <div className="font-medium">{user?.name || user?.email}</div>
+                  <div className="font-mono text-[10.5px] text-muted-foreground">{business?.name}</div>
+                </div>
+                <Avatar className="h-8 w-8">
                   <AvatarFallback>{user ? initials(user.name, user.email) : '?'}</AvatarFallback>
                 </Avatar>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{user?.name || user?.email}</div>
-                  <div className="truncate font-mono text-[11px] text-muted-foreground">{user?.email}</div>
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">
-                  Business
-                </DropdownMenuLabel>
-                <div className="px-2 pb-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{business?.name}</span>
-                  </div>
-                  <div className="mt-2 rounded-md border p-2">
-                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                      {settings?.jurisdiction ?? '—'}
-                    </div>
-                    <div className="mt-1 text-xs font-medium">
-                      {settings?.jurisdiction ? JURISDICTION_LABELS[settings.jurisdiction] : 'No jurisdiction set'}
-                    </div>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <div className="flex items-center gap-2.5 px-2 py-1.5">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback>{user ? initials(user.name, user.email) : '?'}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{user?.name || user?.email}</div>
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">{user?.email}</div>
                   </div>
                 </div>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onNavigate('settings')}>
-                <Settings /> Business settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => logout()}>
-                <LogOut /> Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </header>
-        <main className="flex-1 p-6">{children}</main>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground uppercase">
+                    Business
+                  </DropdownMenuLabel>
+                  <div className="px-2 pb-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{business?.name}</span>
+                    </div>
+                    <div className="mt-2 rounded-md border p-2">
+                      <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        {settings?.jurisdiction ?? '—'}
+                      </div>
+                      <div className="mt-1 text-xs font-medium">
+                        {settings?.jurisdiction ? JURISDICTION_LABELS[settings.jurisdiction] : 'No jurisdiction set'}
+                      </div>
+                    </div>
+                  </div>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate('/settings')}>
+                  <Settings /> Business settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+                  <LogOut /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          }
+        />
+        <main className="flex-1 p-6">
+          <Outlet />
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )

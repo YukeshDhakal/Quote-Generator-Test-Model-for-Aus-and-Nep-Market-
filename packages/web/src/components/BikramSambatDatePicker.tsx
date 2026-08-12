@@ -1,9 +1,24 @@
 import { useState } from 'react'
 import { CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react'
-import { NepaliDate } from 'nepali-date-library'
+// Namespace import with a defensive fallback cascade, not a plain named or default import:
+// this package's CJS/ESM interop shape differs across the three environments this file actually
+// runs in — Vite dev (esbuild pre-bundling: named export works directly), the production client
+// build (Rollup), and the SSR build used for prerendering (externalized, raw Node loader: only
+// the default-import-as-whole-object shape works). A namespace import resolves in all three; the
+// cascade below picks whichever shape is actually present at runtime.
+import * as nepaliDateLibraryNs from 'nepali-date-library'
+import type { NepaliDate as NepaliDateClass } from 'nepali-date-library'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+
+function resolveNepaliDateClass(): typeof NepaliDateClass {
+  const ns = nepaliDateLibraryNs as unknown as Record<string, unknown>
+  const fromDefault = ns.default as Record<string, unknown> | undefined
+  return (ns.NepaliDate ?? fromDefault?.NepaliDate ?? ns.default) as typeof NepaliDateClass
+}
+
+const NepaliDate = resolveNepaliDateClass()
 
 function pad2(n: number) {
   return String(n).padStart(2, '0')

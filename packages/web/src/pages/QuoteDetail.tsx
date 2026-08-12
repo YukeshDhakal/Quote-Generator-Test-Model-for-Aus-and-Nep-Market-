@@ -1,23 +1,21 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Download, Pencil } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { formatAmount } from '@quote-engine/engine'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getQuote, quotePdfUrl, type QuoteDetail as QuoteDetailData } from '../api'
 
-interface QuoteDetailProps {
-  quoteId: string
-  onBack: () => void
-  onEdit: (quoteId: string) => void
-}
-
-export function QuoteDetail({ quoteId, onBack, onEdit }: QuoteDetailProps) {
+export function QuoteDetail() {
+  const { id: quoteId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<QuoteDetailData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!quoteId) return
     let cancelled = false
     setData(null)
     getQuote(quoteId)
@@ -45,7 +43,12 @@ export function QuoteDetail({ quoteId, onBack, onEdit }: QuoteDetailProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
     >
-      <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 text-muted-foreground">
+      <Button
+        variant="ghost"
+        size="sm"
+        render={<Link to="/quotes" />}
+        className="-ml-2 text-muted-foreground"
+      >
         <ArrowLeft className="mr-1 h-4 w-4" /> Back to quotes
       </Button>
 
@@ -60,7 +63,7 @@ export function QuoteDetail({ quoteId, onBack, onEdit }: QuoteDetailProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => onEdit(data.quoteRow.id)}>
+          <Button variant="outline" onClick={() => navigate(`/quotes/${data.quoteRow.id}/edit`)}>
             <Pencil className="mr-1 h-4 w-4" /> Edit
           </Button>
           <a

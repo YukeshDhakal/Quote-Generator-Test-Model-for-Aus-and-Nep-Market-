@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import { AU_PROFILE, NP_PROFILE, compareProfileDates, formatAmount, type JurisdictionProfile } from '@quote-engine/engine'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,12 +11,6 @@ import { resolvePreset, type RangePreset } from '../lib/date-range'
 
 const PROFILES: Record<string, JurisdictionProfile> = { AU: AU_PROFILE, NP: NP_PROFILE }
 const VALID_PRESETS: RangePreset[] = ['all', '7d', '30d', 'month', 'fy', 'custom']
-
-interface QuoteListProps {
-  onSelect: (id: string) => void
-  onNew: () => void
-  refreshKey: number
-}
 
 function readFiltersFromUrl(): { search: string; range: DateRangeValue } {
   const params = new URLSearchParams(window.location.search)
@@ -33,7 +28,6 @@ function readFiltersFromUrl(): { search: string; range: DateRangeValue } {
 
 function writeFiltersToUrl(search: string, range: DateRangeValue) {
   const params = new URLSearchParams()
-  params.set('view', 'quotes')
   if (search) params.set('search', search)
   if (range.preset !== 'all') params.set('range', range.preset)
   if (range.preset === 'custom') {
@@ -44,7 +38,8 @@ function writeFiltersToUrl(search: string, range: DateRangeValue) {
   window.history.replaceState(null, '', next)
 }
 
-export function QuoteList({ onSelect, onNew, refreshKey }: QuoteListProps) {
+export function QuoteList() {
+  const navigate = useNavigate()
   const [quotes, setQuotes] = useState<QuoteSummary[]>([])
   const initial = useMemo(readFiltersFromUrl, [])
   const [search, setSearch] = useState(initial.search)
@@ -97,7 +92,7 @@ export function QuoteList({ onSelect, onNew, refreshKey }: QuoteListProps) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, range, profile, refreshKey])
+  }, [search, range, profile])
 
   function clearFilters() {
     setSearch('')
@@ -113,7 +108,7 @@ export function QuoteList({ onSelect, onNew, refreshKey }: QuoteListProps) {
     >
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Quotes</h1>
-        <Button onClick={onNew}>+ New quote</Button>
+        <Button onClick={() => navigate('/quotes/new')}>+ New quote</Button>
       </div>
 
       <div className="flex flex-wrap items-start gap-2">
@@ -153,7 +148,7 @@ export function QuoteList({ onSelect, onNew, refreshKey }: QuoteListProps) {
           </TableHeader>
           <TableBody>
             {quotes.map((q) => (
-              <TableRow key={q.id} className="cursor-pointer" onClick={() => onSelect(q.id)}>
+              <TableRow key={q.id} className="cursor-pointer" onClick={() => navigate(`/quotes/${q.id}`)}>
                 <TableCell className="font-medium">{q.quoteNumber}</TableCell>
                 <TableCell>{q.customerName}</TableCell>
                 <TableCell>{q.documentTypeTitle}</TableCell>

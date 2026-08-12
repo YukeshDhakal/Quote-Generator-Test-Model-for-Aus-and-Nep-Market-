@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { QuoteForm, type QuoteFormPayload } from '../components/QuoteForm'
 import { getQuote, updateQuote, updateRequest, type QuoteDetail } from '../api'
 
-interface EditQuoteProps {
-  quoteId: string
-  onSaved: (quoteId: string) => void
-}
-
-export function EditQuote({ quoteId, onSaved }: EditQuoteProps) {
+export function EditQuote() {
+  const { id: quoteId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<QuoteDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!quoteId) return
     let cancelled = false
     getQuote(quoteId)
       .then((d) => {
@@ -45,7 +44,7 @@ export function EditQuote({ quoteId, onSaved }: EditQuoteProps) {
       delivery: payload.delivery,
     })
 
-    onSaved(data.quoteRow.id)
+    navigate(`/quotes/${data.quoteRow.id}`)
   }
 
   return (

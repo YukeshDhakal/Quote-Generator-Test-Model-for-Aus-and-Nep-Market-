@@ -1,19 +1,9 @@
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Logo } from '../components/Logo'
+import { MarketingLayout } from '../components/MarketingLayout'
 import { useCurveReveal } from '../lib/use-curve-reveal'
-
-interface LandingPageProps {
-  onSignIn: () => void
-  onGetStarted: () => void
-}
-
-const NAV_LINKS = [
-  { label: 'What we do', href: '#problem' },
-  { label: 'Jurisdictions', href: '#jurisdictions' },
-  { label: 'Roadmap', href: '#' },
-]
 
 const RATE_STRIP = [
   { label: 'Australia', value: 'GST 10% · inside the price' },
@@ -50,7 +40,8 @@ const PROOF_LINE_ITEMS = [
   { description: 'Loading dock labour', amount: '1,728.00' },
 ]
 
-export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
+export function LandingPage() {
+  const navigate = useNavigate()
   const heroInvoice = useCurveReveal<HTMLDivElement>()
   const problemHeading = useCurveReveal<HTMLDivElement>()
   const problemLeft = useCurveReveal<HTMLDivElement>()
@@ -61,45 +52,7 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
   const closingCta = useCurveReveal<HTMLDivElement>()
 
   return (
-    // overflow-x-clip, not overflow-x-hidden: "hidden" establishes a scroll container per the
-    // CSS overflow spec, which breaks position:sticky on the nav below (it stops pinning against
-    // the real viewport and just scrolls away with the page). "clip" still contains the hero's
-    // decorative ghost-plate bleed without that side effect.
-    <div className="relative min-h-screen overflow-x-clip bg-zinc-950 text-zinc-50">
-      {/* Ambient glow — scoped to the top of the page, not per-section */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[1200px] opacity-45"
-        style={{
-          backgroundImage:
-            'radial-gradient(700px circle at 12% 8%, rgba(255,255,255,.07), transparent 62%), radial-gradient(560px circle at 78% 46%, rgba(255,255,255,.05), transparent 60%)',
-        }}
-      />
-
-      {/* Nav */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-zinc-950/80 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-[1310px] items-center justify-between px-5 md:px-14">
-          <Logo size={22} className="text-zinc-50 [&_span]:text-zinc-50" />
-          <nav className="hidden items-center gap-8 text-[13.5px] text-zinc-400 sm:flex">
-            {NAV_LINKS.map((link) => (
-              <a key={link.label} href={link.href} className="transition-colors hover:text-zinc-50">
-                {link.label}
-              </a>
-            ))}
-          </nav>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" className="text-zinc-50 hover:bg-white/10 hover:text-zinc-50" onClick={onSignIn}>
-              Sign in
-            </Button>
-            <Button
-              className="h-auto rounded-lg bg-zinc-50 px-[15px] py-2 text-[13.5px] font-medium text-zinc-950 hover:bg-zinc-200"
-              onClick={onGetStarted}
-            >
-              Register
-            </Button>
-          </div>
-        </div>
-      </header>
-
+    <MarketingLayout>
       <main className="relative mx-auto max-w-[1310px] px-5 md:px-14">
         {/* Hero — promise beside proof */}
         <section
@@ -125,7 +78,7 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
             <div className="mt-[34px] flex flex-wrap items-center gap-[14px]">
               <Button
                 className="h-auto rounded-[9px] bg-zinc-50 px-[22px] py-[13px] text-[14.5px] font-medium text-zinc-950 hover:bg-zinc-200"
-                onClick={onGetStarted}
+                onClick={() => navigate('/signup')}
               >
                 Get started free
               </Button>
@@ -212,7 +165,7 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
       </main>
 
       {/* Jurisdiction rate strip — full-bleed */}
-      <section id="jurisdictions" className="scroll-mt-16 border-y border-white/10">
+      <section className="border-y border-white/10">
         <div className="grid grid-cols-2 md:grid-cols-4">
           {RATE_STRIP.map((cell, i) => (
             <div
@@ -464,14 +417,14 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
           <div className="mt-[34px] flex flex-wrap items-center justify-center gap-[14px]">
             <Button
               className="h-auto rounded-[9px] bg-zinc-50 px-[22px] py-[13px] text-[14.5px] font-medium text-zinc-950 hover:bg-zinc-200"
-              onClick={onGetStarted}
+              onClick={() => navigate('/signup')}
             >
               Get started free
             </Button>
             <Button
               variant="ghost"
               className="h-auto rounded-[9px] border border-white/15 px-[22px] py-[13px] text-[14.5px] font-medium text-zinc-50 hover:bg-white/10"
-              onClick={onSignIn}
+              onClick={() => navigate('/login')}
             >
               Sign in
             </Button>
@@ -480,28 +433,7 @@ export function LandingPage({ onSignIn, onGetStarted }: LandingPageProps) {
             Australia · Nepal live today · one verified jurisdiction at a time
           </p>
         </motion.div>
-
-        <footer className="flex flex-col items-center gap-4 border-t border-white/10 py-[26px] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2.5">
-            <Logo size={18} showWordmark={false} className="[&_path]:fill-zinc-400 [&_rect]:fill-zinc-800" />
-            <span className="font-mono text-xs text-zinc-600">&copy; {new Date().getFullYear()} Quote Engine</span>
-          </div>
-          <div className="flex items-center gap-[26px] font-mono text-xs text-zinc-500">
-            <a href="#jurisdictions" className="hover:text-zinc-300">
-              Jurisdictions
-            </a>
-            <a href="#" className="hover:text-zinc-300">
-              Roadmap
-            </a>
-            <a href="#" className="hover:text-zinc-300">
-              Privacy
-            </a>
-            <a href="#" className="hover:text-zinc-300">
-              Contact
-            </a>
-          </div>
-        </footer>
       </main>
-    </div>
+    </MarketingLayout>
   )
 }

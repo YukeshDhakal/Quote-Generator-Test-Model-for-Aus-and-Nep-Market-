@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { QuoteForm, type QuoteFormPayload } from '../components/QuoteForm'
 import { createQuote, createRequest, getBusiness } from '../api'
 
-interface NewQuoteProps {
-  onCreated: (quoteId: string) => void
-  onGoToSettings: () => void
-}
-
-export function NewQuote({ onCreated, onGoToSettings }: NewQuoteProps) {
+export function NewQuote() {
+  const navigate = useNavigate()
   const [jurisdiction, setJurisdiction] = useState<string | null | undefined>(undefined)
 
   useEffect(() => {
@@ -31,7 +28,7 @@ export function NewQuote({ onCreated, onGoToSettings }: NewQuoteProps) {
       delivery: payload.delivery,
     })
 
-    onCreated(quote.quoteRow.id)
+    navigate(`/quotes/${quote.quoteRow.id}`)
   }
 
   if (jurisdiction === undefined) {
@@ -46,7 +43,7 @@ export function NewQuote({ onCreated, onGoToSettings }: NewQuoteProps) {
           Every quote is issued under your business's jurisdiction — the tax rules, calendar, and numbering all
           come from it. Pick one in Business Settings before creating your first quote.
         </p>
-        <Button onClick={onGoToSettings}>Go to Business Settings</Button>
+        <Button onClick={() => navigate('/settings')}>Go to Business Settings</Button>
       </div>
     )
   }
