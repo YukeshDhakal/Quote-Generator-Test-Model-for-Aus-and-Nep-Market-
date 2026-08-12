@@ -38,18 +38,19 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
-// Web (www.quoteengine.dev) and API (api.quoteengine.dev) are on different subdomains of the
-// same registrable domain, which browsers treat as "same-site" — so SameSite=Lax is sent on
-// cross-subdomain fetches and isn't subject to third-party-cookie blocking (Safari ITP, Brave,
-// Chrome's rollout), unlike the SameSite=None this used before the API moved off *.fly.dev.
-// Secure still requires HTTPS, which prod always is; local dev runs both over plain http on
-// localhost, where a Secure cookie would silently not be set at all.
+// The API is mid-migration from quoteengine.fly.dev (cross-site to the web app, needs
+// SameSite=None) to api.quoteengine.dev (same-site, can use SameSite=Lax — see the git history
+// of this line). COOKIE_CROSS_SITE flips the cookie back to None for as long as the web app's
+// VITE_API_URL still points at the old fly.dev host; once the DNS cutover to api.quoteengine.dev
+// is verified and VITE_API_URL is switched, unset this var (or delete this flag entirely and
+// hardcode 'lax', matching the SameSite=Lax state this replaced).
 const isProduction = process.env.NODE_ENV === 'production';
+const crossSite = process.env.COOKIE_CROSS_SITE === 'true';
 
 export const sessionCookieName = SESSION_COOKIE;
 export const sessionCookieOptions = {
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: (crossSite ? 'none' : 'lax') as 'none' | 'lax',
   secure: isProduction,
   maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
