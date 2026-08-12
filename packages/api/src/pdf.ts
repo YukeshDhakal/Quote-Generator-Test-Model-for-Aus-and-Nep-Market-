@@ -184,15 +184,23 @@ function getBrowser(): Promise<Browser> {
     // The container runs as root (no USER directive in the Dockerfile), and Chromium refuses to
     // start sandboxed as root - without --no-sandbox this rejects with "Failed to launch the
     // browser process! Running as root without --no-sandbox is not supported" on every attempt.
-    // --disable-dev-shm-usage is also required here: Docker's default /dev/shm is only 64MB,
-    // too small for Chromium's rendering process, which made page.setContent() hang until
-    // Puppeteer's own 30s navigation timeout instead of failing fast - confirmed live by timing
-    // a direct request (72s wall time, "Timed out after waiting 30000ms") after --no-sandbox
-    // alone let the browser launch but not actually render. This flag makes Chromium use /tmp
-    // for shared memory instead.
+    // --disable-dev-shm-usage avoids Docker's undersized default /dev/shm (64MB). Neither flag
+    // alone was enough on this machine's 512MB/shared-CPU Fly VM (confirmed live: `free -m`
+    // showed ~9MB free at idle) - page.setContent() still hung until Puppeteer's own 30s
+    // navigation timeout instead of rendering. --single-process --no-zygote avoids spawning
+    // Chromium's normal renderer/GPU/zygote process tree, which is the standard mitigation for
+    // running headless Chrome in <1GB-memory environments. If PDF generation is still
+    // unreliable after this, the fix is a bigger Fly VM (fly.toml [[vm]] memory), not another
+    // launch flag - don't keep guessing flags past this point.
     browserPromise = puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--no-zygote',
+      ],
     });
     browserPromise.catch(() => {
       // Don't let a launch failure permanently wedge PDF generation - without this, the first
