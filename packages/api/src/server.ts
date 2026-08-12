@@ -69,10 +69,13 @@ function validateDiscount(discount: Discount | undefined | null): string | null 
   return null;
 }
 
-const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5183';
+// Comma-separated so the old and new frontend domain can both be allowed during a domain
+// migration - swapping this to a single value the moment a new domain is bought would break
+// CORS for whichever origin is still actually live until the new domain is attached in Vercel.
+const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? 'http://localhost:5183').split(',').map((o) => o.trim());
 
 const app = express();
-app.use(cors({ origin: WEB_ORIGIN, credentials: true }));
+app.use(cors({ origin: WEB_ORIGINS, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(uploadsDir));
