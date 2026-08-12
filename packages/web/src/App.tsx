@@ -1,19 +1,24 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { AppShell } from './components/AppShell'
-import { AuthPage } from './pages/AuthPage'
-import { BusinessSettings } from './pages/BusinessSettings'
-import { Dashboard } from './pages/Dashboard'
-import { EditQuote } from './pages/EditQuote'
 import { JurisdictionDetail } from './pages/JurisdictionDetail'
 import { JurisdictionsIndex } from './pages/JurisdictionsIndex'
 import { LandingPage } from './pages/LandingPage'
-import { NewQuote } from './pages/NewQuote'
-import { QuoteDetail } from './pages/QuoteDetail'
-import { QuoteList } from './pages/QuoteList'
 import { Roadmap } from './pages/Roadmap'
 import { WhatWeDo } from './pages/WhatWeDo'
 import { AuthProvider, useAuth } from './lib/auth-context'
+
+// Code-split: none of these are reachable from an anonymous landing-page visit, and none are
+// part of SSR prerendering (only the public marketing/jurisdiction routes above are prerendered
+// via scripts/prerender.mjs), so lazy-loading them keeps the initial bundle to just what the
+// site's primary LCP target - the public landing page - actually needs.
+const AppShell = lazy(() => import('./components/AppShell').then((m) => ({ default: m.AppShell })))
+const AuthPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.AuthPage })))
+const BusinessSettings = lazy(() => import('./pages/BusinessSettings').then((m) => ({ default: m.BusinessSettings })))
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })))
+const EditQuote = lazy(() => import('./pages/EditQuote').then((m) => ({ default: m.EditQuote })))
+const NewQuote = lazy(() => import('./pages/NewQuote').then((m) => ({ default: m.NewQuote })))
+const QuoteDetail = lazy(() => import('./pages/QuoteDetail').then((m) => ({ default: m.QuoteDetail })))
+const QuoteList = lazy(() => import('./pages/QuoteList').then((m) => ({ default: m.QuoteList })))
 
 function LoadingScreen() {
   return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>
@@ -29,9 +34,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** Unlike RequireAuth/RedirectIfAuthed, this must NOT gate on `loading` — the landing page
+ * is the site's primary LCP target and has to paint immediately for anonymous visitors, who
+ * are the common case. `user` stays null until the auth check resolves, so a logged-in visitor
+ * briefly sees the landing page before being redirected to /dashboard - an acceptable tradeoff
+ * for not blocking every anonymous pageview on an auth round-trip. */
 function HomeRoute() {
-  const { user, loading } = useAuth()
-  if (loading) return <LoadingScreen />
+  const { user } = useAuth()
   if (user) return <Navigate to="/dashboard" replace />
   return <LandingPage />
 }
@@ -57,7 +66,9 @@ function AppRoutes() {
         path="/login"
         element={
           <RedirectIfAuthed>
-            <AuthPage initialMode="login" />
+            <Suspense fallback={<LoadingScreen />}>
+              <AuthPage initialMode="login" />
+            </Suspense>
           </RedirectIfAuthed>
         }
       />
@@ -65,7 +76,9 @@ function AppRoutes() {
         path="/signup"
         element={
           <RedirectIfAuthed>
-            <AuthPage initialMode="signup" />
+            <Suspense fallback={<LoadingScreen />}>
+              <AuthPage initialMode="signup" />
+            </Suspense>
           </RedirectIfAuthed>
         }
       />
@@ -74,7 +87,9 @@ function AppRoutes() {
       <Route
         element={
           <RequireAuth>
-            <AppShell />
+            <Suspense fallback={<LoadingScreen />}>
+              <AppShell />
+            </Suspense>
           </RequireAuth>
         }
       >
