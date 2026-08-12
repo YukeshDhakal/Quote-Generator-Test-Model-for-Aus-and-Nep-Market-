@@ -1,0 +1,26 @@
+app = "quoteengine"
+primary_region = "syd"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# Persists the SQLite db, uploaded logos, and the generated session secret across deploys and
+# restarts — all three already live under packages/api/data (see db.ts / business.ts / auth.ts),
+# so mounting the volume there is a drop-in fit with no source changes needed.
+[[mounts]]
+  source = "quoteengine_data"
+  destination = "/app/packages/api/data"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
