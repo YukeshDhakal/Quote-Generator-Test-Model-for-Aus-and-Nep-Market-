@@ -7,3 +7,6 @@ packages/api/data/
 *.db-wal
 *.db-shm
 .env
+
+.vercel
+.env*
