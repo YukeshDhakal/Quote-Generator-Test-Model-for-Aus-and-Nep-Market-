@@ -1,3 +1,4 @@
+import 'express-async-errors';
 import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
 import cookieParser from 'cookie-parser';
@@ -39,7 +40,7 @@ import {
   verifySession,
 } from './auth.js';
 import { getBusinessSettings, saveBusinessSettings, uploadsDir } from './business.js';
-import { db } from './db.js';
+import { pool, withTransaction } from './db.js';
 import { nextQuoteNumber, peekNextQuoteNumber } from './numbering.js';
 import { todayInProfileCalendar } from './today.js';
 import { buildQuoteHtml, renderQuotePdf } from './pdf.js';
@@ -160,12 +161,12 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
   if (jurisdiction && !PROFILES[jurisdiction]) {
     return res.status(400).json({ error: `unknown jurisdiction "${jurisdiction}"` });
   }
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     return res.status(409).json({ error: 'an account with this email already exists' });
   }
 
   const passwordHash = await hashPassword(password);
-  const { user, business } = createUserWithBusiness({
+  const { user, business } = await createUserWithBusiness({
     email,
     name: name ?? null,
     passwordHash,
@@ -179,7 +180,7 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body ?? {};
-  const user = email ? findUserByEmail(email) : undefined;
+  const user = email ? await findUserByEmail(email) : undefined;
   if (!user || !user.password_hash) {
     return res.status(401).json({ error: 'invalid email or password' });
   }
@@ -188,7 +189,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     return res.status(401).json({ error: 'invalid email or password' });
   }
 
-  const business = findBusinessForOwner(user.id);
+  const business = await findBusinessForOwner(user.id);
   if (!business) {
     return res.status(500).json({ error: 'account has no business associated' });
   }
@@ -214,15 +215,15 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
     return res.status(401).json({ error: err instanceof Error ? err.message : 'invalid Google credential' });
   }
 
-  let user = findUserByGoogleId(payload.sub);
+  let user = await findUserByGoogleId(payload.sub);
 
   if (!user) {
-    const existingByEmail = findUserByEmail(payload.email);
+    const existingByEmail = await findUserByEmail(payload.email);
     if (existingByEmail) {
-      linkGoogleIdToUser(existingByEmail.id, payload.sub);
+      await linkGoogleIdToUser(existingByEmail.id, payload.sub);
       user = { ...existingByEmail, google_id: payload.sub };
     } else {
-      const created = createUserWithBusiness({
+      const created = await createUserWithBusiness({
         email: payload.email,
         name: payload.name ?? null,
         googleId: payload.sub,
@@ -232,7 +233,7 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
     }
   }
 
-  const business = findBusinessForOwner(user.id);
+  const business = await findBusinessForOwner(user.id);
   if (!business) {
     return res.status(500).json({ error: 'account has no business associated' });
   }
@@ -246,41 +247,44 @@ app.post('/api/auth/logout', (_req, res) => {
   res.status(204).end();
 });
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  const user = findUserById(req.userId!);
-  const business = findBusinessById(req.businessId!);
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  const user = await findUserById(req.userId!);
+  const business = await findBusinessById(req.businessId!);
   if (!user || !business) return res.status(401).json({ error: 'not authenticated' });
   res.json({ user: { id: user.id, email: user.email, name: user.name }, business });
 });
 
-app.get('/api/auth/businesses', requireAuth, (req, res) => {
-  const businesses = listBusinessesForOwner(req.userId!).map((b) => ({
-    ...b,
-    jurisdiction: getBusinessSettings(b.id).jurisdiction,
-    active: b.id === req.businessId,
-  }));
+app.get('/api/auth/businesses', requireAuth, async (req, res) => {
+  const owned = await listBusinessesForOwner(req.userId!);
+  const businesses = await Promise.all(
+    owned.map(async (b) => ({
+      ...b,
+      jurisdiction: (await getBusinessSettings(b.id)).jurisdiction,
+      active: b.id === req.businessId,
+    })),
+  );
   res.json(businesses);
 });
 
-app.post('/api/auth/businesses', requireAuth, (req, res) => {
+app.post('/api/auth/businesses', requireAuth, async (req, res) => {
   const { name, jurisdiction } = req.body ?? {};
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!jurisdiction || !PROFILES[jurisdiction]) {
     return res.status(400).json({ error: `unknown jurisdiction "${jurisdiction}"` });
   }
 
-  const business = createBusinessForUser(req.userId!, name, jurisdiction);
+  const business = await createBusinessForUser(req.userId!, name, jurisdiction);
   setSessionCookie(res, req.userId!, business.id);
   res.status(201).json(business);
 });
 
-app.post('/api/auth/switch-business', requireAuth, (req, res) => {
+app.post('/api/auth/switch-business', requireAuth, async (req, res) => {
   const { businessId } = req.body ?? {};
-  if (!businessId || !isBusinessOwnedByUser(businessId, req.userId!)) {
+  if (!businessId || !(await isBusinessOwnedByUser(businessId, req.userId!))) {
     return res.status(403).json({ error: 'not your business' });
   }
   setSessionCookie(res, req.userId!, businessId);
-  const business = findBusinessById(businessId);
+  const business = await findBusinessById(businessId);
   res.json({ business });
 });
 
@@ -323,30 +327,34 @@ interface LineItemRow {
   description: string;
   qty: number;
   unit_price: number;
-  taxable: number;
+  taxable: boolean;
   sort_order: number;
 }
 
-function loadQuote(businessId: string, quoteId: string) {
-  const quoteRow = db.prepare('SELECT * FROM quotes WHERE id = ? AND business_id = ?').get(quoteId, businessId) as
-    | QuoteRow
-    | undefined;
+async function loadQuote(businessId: string, quoteId: string) {
+  const { rows: quoteRows } = await pool.query<QuoteRow>('SELECT * FROM quotes WHERE id = $1 AND business_id = $2', [
+    quoteId,
+    businessId,
+  ]);
+  const quoteRow = quoteRows[0];
   if (!quoteRow) return null;
 
-  const requestRow = db.prepare('SELECT * FROM requests WHERE id = ?').get(quoteRow.request_id) as
-    | RequestRow
-    | undefined;
+  const { rows: requestRows } = await pool.query<RequestRow>('SELECT * FROM requests WHERE id = $1', [
+    quoteRow.request_id,
+  ]);
+  const requestRow = requestRows[0];
 
-  const lineItemRows = db
-    .prepare('SELECT * FROM line_items WHERE quote_id = ? ORDER BY sort_order')
-    .all(quoteId) as unknown as LineItemRow[];
+  const { rows: lineItemRows } = await pool.query<LineItemRow>(
+    'SELECT * FROM line_items WHERE quote_id = $1 ORDER BY sort_order',
+    [quoteId],
+  );
 
   const lineItems: LineItem[] = lineItemRows.map((row) => ({
     productCode: row.product_code ?? '',
     description: row.description,
     qty: row.qty,
     unitPrice: row.unit_price,
-    taxable: Boolean(row.taxable),
+    taxable: row.taxable,
   }));
 
   const orderDiscount: Discount | undefined = quoteRow.order_discount_type
@@ -387,74 +395,74 @@ app.use('/api/quotes', requireAuth);
 app.use('/api/business', requireAuth);
 app.use('/api/dashboard', requireAuth);
 
-app.post('/api/requests', (req, res) => {
+app.post('/api/requests', async (req, res) => {
   const { customerName, companyName, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
   const id = randomUUID();
-  db.prepare(
+  await pool.query(
     `INSERT INTO requests (id, business_id, customer_name, company_name, delivery_address, billing_address, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    req.businessId!,
-    customerName,
-    companyName ?? null,
-    deliveryAddress ?? null,
-    billingAddress ?? null,
-    new Date().toISOString(),
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, req.businessId!, customerName, companyName ?? null, deliveryAddress ?? null, billingAddress ?? null, new Date().toISOString()],
   );
 
   res.status(201).json({ id, customerName, companyName, deliveryAddress, billingAddress });
 });
 
-app.put('/api/requests/:id', (req, res) => {
-  const existing = db
-    .prepare('SELECT * FROM requests WHERE id = ? AND business_id = ?')
-    .get(req.params.id, req.businessId!) as RequestRow | undefined;
-  if (!existing) return res.status(404).json({ error: 'request not found' });
+app.put('/api/requests/:id', async (req, res) => {
+  const { rows } = await pool.query<RequestRow>('SELECT * FROM requests WHERE id = $1 AND business_id = $2', [
+    req.params.id,
+    req.businessId!,
+  ]);
+  if (!rows[0]) return res.status(404).json({ error: 'request not found' });
 
   const { customerName, companyName, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
-  db.prepare(
-    `UPDATE requests SET customer_name = ?, company_name = ?, delivery_address = ?, billing_address = ?
-     WHERE id = ? AND business_id = ?`,
-  ).run(customerName, companyName ?? null, deliveryAddress ?? null, billingAddress ?? null, req.params.id, req.businessId!);
+  await pool.query(
+    `UPDATE requests SET customer_name = $1, company_name = $2, delivery_address = $3, billing_address = $4
+     WHERE id = $5 AND business_id = $6`,
+    [customerName, companyName ?? null, deliveryAddress ?? null, billingAddress ?? null, req.params.id, req.businessId!],
+  );
 
   res.json({ id: req.params.id, customerName, companyName: companyName ?? null, deliveryAddress: deliveryAddress ?? null, billingAddress: billingAddress ?? null });
 });
 
-app.get('/api/requests', (req, res) => {
-  const rows = db
-    .prepare('SELECT * FROM requests WHERE business_id = ? ORDER BY created_at DESC')
-    .all(req.businessId!) as unknown as RequestRow[];
-  const withQuoteCounts = rows.map((row) => {
-    const { count } = db.prepare('SELECT COUNT(*) as count FROM quotes WHERE request_id = ?').get(row.id) as {
-      count: number;
-    };
-    return {
-      id: row.id,
-      customerName: row.customer_name,
-      companyName: row.company_name,
-      deliveryAddress: row.delivery_address,
-      billingAddress: row.billing_address,
-      createdAt: row.created_at,
-      quoteCount: count,
-    };
-  });
+app.get('/api/requests', async (req, res) => {
+  const { rows } = await pool.query<RequestRow>('SELECT * FROM requests WHERE business_id = $1 ORDER BY created_at DESC', [
+    req.businessId!,
+  ]);
+  const withQuoteCounts = await Promise.all(
+    rows.map(async (row) => {
+      const { rows: countRows } = await pool.query<{ count: string }>(
+        'SELECT COUNT(*) as count FROM quotes WHERE request_id = $1',
+        [row.id],
+      );
+      return {
+        id: row.id,
+        customerName: row.customer_name,
+        companyName: row.company_name,
+        deliveryAddress: row.delivery_address,
+        billingAddress: row.billing_address,
+        createdAt: row.created_at,
+        quoteCount: Number(countRows[0].count),
+      };
+    }),
+  );
   res.json(withQuoteCounts);
 });
 
-app.post('/api/requests/:requestId/quotes', (req, res) => {
+app.post('/api/requests/:requestId/quotes', async (req, res) => {
   const { requestId } = req.params;
-  const requestRow = db
-    .prepare('SELECT * FROM requests WHERE id = ? AND business_id = ?')
-    .get(requestId, req.businessId!) as RequestRow | undefined;
+  const { rows: requestRows } = await pool.query<RequestRow>(
+    'SELECT * FROM requests WHERE id = $1 AND business_id = $2',
+    [requestId, req.businessId!],
+  );
+  const requestRow = requestRows[0];
   if (!requestRow) {
     return res.status(404).json({ error: 'request not found' });
   }
@@ -463,7 +471,7 @@ app.post('/api/requests/:requestId/quotes', (req, res) => {
 
   // Jurisdiction is never taken from the client — it's the business's own locked jurisdiction,
   // set once in Business Settings. A business registered in one place can't quote as another.
-  const jurisdiction = getBusinessSettings(req.businessId!).jurisdiction;
+  const jurisdiction = (await getBusinessSettings(req.businessId!)).jurisdiction;
   if (!jurisdiction) {
     return res
       .status(400)
@@ -489,70 +497,62 @@ app.post('/api/requests/:requestId/quotes', (req, res) => {
 
   const quoteId = randomUUID();
   const fiscalYear = financialYearTag(profile, date);
-  const quoteNumber = nextQuoteNumber(db, req.businessId!, jurisdiction, documentTypeKey, fiscalYear);
 
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.prepare(
+  // Number allocation and quote/line-item insert share one transaction, so a failed insert rolls
+  // the allocation back too instead of permanently burning a gap in the "gapless" sequence.
+  await withTransaction(async (client) => {
+    const quoteNumber = await nextQuoteNumber(client, req.businessId!, jurisdiction, documentTypeKey, fiscalYear);
+
+    await client.query(
       `INSERT INTO quotes (
         id, business_id, request_id, quote_number, jurisdiction, jurisdiction_profile_version, jurisdiction_profile_json,
         document_type_key, split_value, quote_date, order_discount_type, order_discount_value,
         delivery_mode, delivery_amount, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      quoteId,
-      req.businessId!,
-      requestId,
-      quoteNumber,
-      jurisdiction,
-      profile.version,
-      JSON.stringify(profile),
-      documentTypeKey,
-      splitValue ?? null,
-      date,
-      orderDiscount?.type ?? null,
-      orderDiscount?.value ?? null,
-      delivery?.mode ?? null,
-      delivery?.amount ?? null,
-      new Date().toISOString(),
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [
+        quoteId,
+        req.businessId!,
+        requestId,
+        quoteNumber,
+        jurisdiction,
+        profile.version,
+        JSON.stringify(profile),
+        documentTypeKey,
+        splitValue ?? null,
+        date,
+        orderDiscount?.type ?? null,
+        orderDiscount?.value ?? null,
+        delivery?.mode ?? null,
+        delivery?.amount ?? null,
+        new Date().toISOString(),
+      ],
     );
 
-    lineItems.forEach((item: LineItem, index: number) => {
-      db.prepare(
+    for (const [index, item] of (lineItems as LineItem[]).entries()) {
+      await client.query(
         `INSERT INTO line_items (id, quote_id, product_code, description, qty, unit_price, taxable, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        randomUUID(),
-        quoteId,
-        item.productCode ?? null,
-        item.description,
-        item.qty,
-        item.unitPrice,
-        item.taxable ? 1 : 0,
-        index,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [randomUUID(), quoteId, item.productCode ?? null, item.description, item.qty, item.unitPrice, item.taxable, index],
       );
-    });
+    }
+  });
 
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-
-  const loaded = loadQuote(req.businessId!, quoteId);
+  const loaded = await loadQuote(req.businessId!, quoteId);
   res.status(201).json(loaded);
 });
 
-app.get('/api/quotes/:id', (req, res) => {
-  const loaded = loadQuote(req.businessId!, req.params.id);
+app.get('/api/quotes/:id', async (req, res) => {
+  const loaded = await loadQuote(req.businessId!, req.params.id);
   if (!loaded) return res.status(404).json({ error: 'quote not found' });
   res.json(loaded);
 });
 
-app.put('/api/quotes/:id', (req, res) => {
-  const quoteRow = db
-    .prepare('SELECT * FROM quotes WHERE id = ? AND business_id = ?')
-    .get(req.params.id, req.businessId!) as QuoteRow | undefined;
+app.put('/api/quotes/:id', async (req, res) => {
+  const { rows } = await pool.query<QuoteRow>('SELECT * FROM quotes WHERE id = $1 AND business_id = $2', [
+    req.params.id,
+    req.businessId!,
+  ]);
+  const quoteRow = rows[0];
   if (!quoteRow) return res.status(404).json({ error: 'quote not found' });
 
   // Jurisdiction is not editable here — it's baked into the quote number's prefix, so changing
@@ -574,53 +574,40 @@ app.put('/api/quotes/:id', (req, res) => {
     return res.status(400).json({ error: discountError });
   }
 
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.prepare(
+  await withTransaction(async (client) => {
+    await client.query(
       `UPDATE quotes SET
-        document_type_key = ?, split_value = ?, quote_date = ?, order_discount_type = ?, order_discount_value = ?,
-        delivery_mode = ?, delivery_amount = ?, pdf_path = NULL
-       WHERE id = ?`,
-    ).run(
-      documentTypeKey,
-      splitValue ?? null,
-      date,
-      orderDiscount?.type ?? null,
-      orderDiscount?.value ?? null,
-      delivery?.mode ?? null,
-      delivery?.amount ?? null,
-      req.params.id,
+        document_type_key = $1, split_value = $2, quote_date = $3, order_discount_type = $4, order_discount_value = $5,
+        delivery_mode = $6, delivery_amount = $7, pdf_path = NULL
+       WHERE id = $8`,
+      [
+        documentTypeKey,
+        splitValue ?? null,
+        date,
+        orderDiscount?.type ?? null,
+        orderDiscount?.value ?? null,
+        delivery?.mode ?? null,
+        delivery?.amount ?? null,
+        req.params.id,
+      ],
     );
 
-    db.prepare('DELETE FROM line_items WHERE quote_id = ?').run(req.params.id);
+    await client.query('DELETE FROM line_items WHERE quote_id = $1', [req.params.id]);
 
-    lineItems.forEach((item: LineItem, index: number) => {
-      db.prepare(
+    for (const [index, item] of (lineItems as LineItem[]).entries()) {
+      await client.query(
         `INSERT INTO line_items (id, quote_id, product_code, description, qty, unit_price, taxable, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        randomUUID(),
-        req.params.id,
-        item.productCode ?? null,
-        item.description,
-        item.qty,
-        item.unitPrice,
-        item.taxable ? 1 : 0,
-        index,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [randomUUID(), req.params.id, item.productCode ?? null, item.description, item.qty, item.unitPrice, item.taxable, index],
       );
-    });
+    }
+  });
 
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-
-  const loaded = loadQuote(req.businessId!, req.params.id);
+  const loaded = await loadQuote(req.businessId!, req.params.id);
   res.json(loaded);
 });
 
-app.get('/api/quotes', (req, res) => {
+app.get('/api/quotes', async (req, res) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : null;
   const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : null;
@@ -628,7 +615,7 @@ app.get('/api/quotes', (req, res) => {
   // Both bounds are expressed in whatever jurisdiction's calendar the client resolved them in
   // (the business's own locked jurisdiction), so validate against that profile.
   if (from && to) {
-    const businessJurisdiction = getBusinessSettings(req.businessId!).jurisdiction;
+    const businessJurisdiction = (await getBusinessSettings(req.businessId!)).jurisdiction;
     const profile = businessJurisdiction ? PROFILES[businessJurisdiction] : null;
     const cmp = profile ? compareProfileDates(profile, from, to) : null;
     if (cmp !== null && cmp > 0) {
@@ -636,25 +623,21 @@ app.get('/api/quotes', (req, res) => {
     }
   }
 
-  const rows = (
-    search
-      ? db
-          .prepare(
-            `SELECT q.*, r.customer_name, r.company_name FROM quotes q
-             JOIN requests r ON r.id = q.request_id
-             WHERE q.business_id = ? AND (q.quote_number LIKE ? OR r.customer_name LIKE ?)
-             ORDER BY q.created_at DESC`,
-          )
-          .all(req.businessId!, `%${search}%`, `%${search}%`)
-      : db
-          .prepare(
-            `SELECT q.*, r.customer_name, r.company_name FROM quotes q
-             JOIN requests r ON r.id = q.request_id
-             WHERE q.business_id = ?
-             ORDER BY q.created_at DESC`,
-          )
-          .all(req.businessId!)
-  ) as unknown as (QuoteRow & { customer_name: string; company_name: string | null })[];
+  const { rows } = search
+    ? await pool.query<QuoteRow & { customer_name: string; company_name: string | null }>(
+        `SELECT q.*, r.customer_name, r.company_name FROM quotes q
+         JOIN requests r ON r.id = q.request_id
+         WHERE q.business_id = $1 AND (q.quote_number ILIKE $2 OR r.customer_name ILIKE $2)
+         ORDER BY q.created_at DESC`,
+        [req.businessId!, `%${search}%`],
+      )
+    : await pool.query<QuoteRow & { customer_name: string; company_name: string | null }>(
+        `SELECT q.*, r.customer_name, r.company_name FROM quotes q
+         JOIN requests r ON r.id = q.request_id
+         WHERE q.business_id = $1
+         ORDER BY q.created_at DESC`,
+        [req.businessId!],
+      );
 
   // Date-range filtering happens here, not in SQL: a quote's date is stored in its own
   // jurisdiction's format (e.g. AU's DD/MM/YYYY isn't lexicographically sortable), so each row
@@ -668,68 +651,76 @@ app.get('/api/quotes', (req, res) => {
         return isWithinProfileDateRange(profile, row.quote_date, from, to);
       });
 
-  const summaries = dateFiltered.map((row) => {
-    const loaded = loadQuote(req.businessId!, row.id)!;
-    return {
-      id: row.id,
-      quoteNumber: row.quote_number,
-      customerName: row.customer_name,
-      companyName: row.company_name,
-      jurisdiction: row.jurisdiction,
-      documentTypeKey: row.document_type_key,
-      documentTypeTitle: loaded.result.documentType.title,
-      date: row.quote_date,
-      grandTotal: loaded.result.totals.grandTotal,
-    };
-  });
+  const summaries = await Promise.all(
+    dateFiltered.map(async (row) => {
+      const loaded = (await loadQuote(req.businessId!, row.id))!;
+      return {
+        id: row.id,
+        quoteNumber: row.quote_number,
+        customerName: row.customer_name,
+        companyName: row.company_name,
+        jurisdiction: row.jurisdiction,
+        documentTypeKey: row.document_type_key,
+        documentTypeTitle: loaded.result.documentType.title,
+        date: row.quote_date,
+        grandTotal: loaded.result.totals.grandTotal,
+      };
+    }),
+  );
 
   res.json(summaries);
 });
 
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', async (req, res) => {
   const businessId = req.businessId!;
-  const { quoteCount } = db.prepare('SELECT COUNT(*) as quoteCount FROM quotes WHERE business_id = ?').get(
-    businessId,
-  ) as { quoteCount: number };
+  const { rows: countRows } = await pool.query<{ quotecount: string }>(
+    'SELECT COUNT(*) as quoteCount FROM quotes WHERE business_id = $1',
+    [businessId],
+  );
+  const quoteCount = Number(countRows[0].quotecount);
 
-  const rows = db
-    .prepare(
-      `SELECT q.*, r.customer_name, r.company_name FROM quotes q
-       JOIN requests r ON r.id = q.request_id
-       WHERE q.business_id = ?
-       ORDER BY q.created_at DESC
-       LIMIT 5`,
-    )
-    .all(businessId) as unknown as (QuoteRow & { customer_name: string; company_name: string | null })[];
+  const { rows } = await pool.query<QuoteRow & { customer_name: string; company_name: string | null }>(
+    `SELECT q.*, r.customer_name, r.company_name FROM quotes q
+     JOIN requests r ON r.id = q.request_id
+     WHERE q.business_id = $1
+     ORDER BY q.created_at DESC
+     LIMIT 5`,
+    [businessId],
+  );
 
-  const recentQuotes = rows.map((row) => {
-    const loaded = loadQuote(businessId, row.id)!;
-    return {
-      id: row.id,
-      quoteNumber: row.quote_number,
-      customerName: row.customer_name,
-      jurisdiction: row.jurisdiction,
-      documentTypeTitle: loaded.result.documentType.title,
-      date: row.quote_date,
-      grandTotal: loaded.result.totals.grandTotal,
-    };
-  });
+  const recentQuotes = await Promise.all(
+    rows.map(async (row) => {
+      const loaded = (await loadQuote(businessId, row.id))!;
+      return {
+        id: row.id,
+        quoteNumber: row.quote_number,
+        customerName: row.customer_name,
+        jurisdiction: row.jurisdiction,
+        documentTypeTitle: loaded.result.documentType.title,
+        date: row.quote_date,
+        grandTotal: loaded.result.totals.grandTotal,
+      };
+    }),
+  );
 
-  const totalsByJurisdiction = (['AU', 'NP'] as const).map((jurisdiction) => {
-    const jurisdictionRows = db
-      .prepare('SELECT id FROM quotes WHERE business_id = ? AND jurisdiction = ?')
-      .all(businessId, jurisdiction) as unknown as { id: string }[];
-    const results = jurisdictionRows.map((r) => loadQuote(businessId, r.id)!.result.totals);
-    const grandTotal = results.reduce((sum, t) => sum + t.grandTotal, 0);
-    const taxTotal = results.reduce((sum, t) => sum + t.taxAmount, 0);
-    return { jurisdiction, quoteCount: jurisdictionRows.length, grandTotal, taxTotal, subtotal: grandTotal - taxTotal };
-  });
+  const totalsByJurisdiction = await Promise.all(
+    (['AU', 'NP'] as const).map(async (jurisdiction) => {
+      const { rows: idRows } = await pool.query<{ id: string }>(
+        'SELECT id FROM quotes WHERE business_id = $1 AND jurisdiction = $2',
+        [businessId, jurisdiction],
+      );
+      const results = await Promise.all(idRows.map(async (r) => (await loadQuote(businessId, r.id))!.result.totals));
+      const grandTotal = results.reduce((sum, t) => sum + t.grandTotal, 0);
+      const taxTotal = results.reduce((sum, t) => sum + t.taxAmount, 0);
+      return { jurisdiction, quoteCount: idRows.length, grandTotal, taxTotal, subtotal: grandTotal - taxTotal };
+    }),
+  );
 
-  const businessJurisdiction = getBusinessSettings(businessId).jurisdiction;
+  const businessJurisdiction = (await getBusinessSettings(businessId)).jurisdiction;
   const nextNumber =
     businessJurisdiction && PROFILES[businessJurisdiction]
-      ? peekNextQuoteNumber(
-          db,
+      ? await peekNextQuoteNumber(
+          pool,
           businessId,
           businessJurisdiction,
           PROFILES[businessJurisdiction].documentTypes[0].key,
@@ -740,11 +731,11 @@ app.get('/api/dashboard', (req, res) => {
   res.json({ quoteCount, recentQuotes, totalsByJurisdiction, businessJurisdiction, nextNumber });
 });
 
-app.get('/api/business', (req, res) => {
-  res.json(getBusinessSettings(req.businessId!));
+app.get('/api/business', async (req, res) => {
+  res.json(await getBusinessSettings(req.businessId!));
 });
 
-app.put('/api/business', (req, res) => {
+app.put('/api/business', async (req, res) => {
   const { jurisdiction, legalName, color, termsText, identifiers } = req.body ?? {};
 
   // Only touch jurisdiction if the caller actually sent it — omitting the key must never
@@ -762,34 +753,44 @@ app.put('/api/business', (req, res) => {
     patch.jurisdiction = jurisdiction;
   }
 
-  const settings = saveBusinessSettings(req.businessId!, patch);
+  const settings = await saveBusinessSettings(req.businessId!, patch);
   res.json(settings);
 });
 
-app.post('/api/business/logo', requireAuth, upload.single('logo'), (req, res) => {
+app.post('/api/business/logo', requireAuth, upload.single('logo'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'logo file is required (field name "logo", png/jpeg/svg/webp, max 2MB)' });
   }
-  const settings = saveBusinessSettings(req.businessId!, { logoPath: join(uploadsDir, req.file.filename) });
+  const settings = await saveBusinessSettings(req.businessId!, { logoPath: join(uploadsDir, req.file.filename) });
   res.json({ ...settings, logoUrl: `/uploads/${req.file.filename}` });
 });
 
 app.get('/api/quotes/:id/pdf', requireAuth, async (req, res) => {
-  const loaded = loadQuote(req.businessId!, req.params.id);
+  const loaded = await loadQuote(req.businessId!, req.params.id);
   if (!loaded) return res.status(404).json({ error: 'quote not found' });
 
-  const business = getBusinessSettings(req.businessId!);
+  const business = await getBusinessSettings(req.businessId!);
   const html = buildQuoteHtml(loaded.quote, loaded.result, business, loaded.customer);
 
   try {
     const pdfPath = await renderQuotePdf(loaded.quoteRow.id, html);
-    db.prepare('UPDATE quotes SET pdf_path = ? WHERE id = ?').run(pdfPath, loaded.quoteRow.id);
+    await pool.query('UPDATE quotes SET pdf_path = $1 WHERE id = $2', [pdfPath, loaded.quoteRow.id]);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${loaded.quote.quoteNumber}.pdf"`);
     res.sendFile(pdfPath);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'PDF generation failed' });
   }
+});
+
+// Catch-all JSON error handler — required now that DB calls are async: express-async-errors
+// forwards rejected promises here instead of the request hanging with no response, which is
+// what would otherwise happen on Express 4.x with no error-handling middleware at all.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: err instanceof Error ? err.message : 'internal server error' });
 });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5187;
