@@ -1,5 +1,6 @@
 import 'express-async-errors';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -21,26 +22,39 @@ import {
 import {
   createBusinessForUser,
   createUserWithBusiness,
+  deleteGmailConnection,
+  exchangeGmailCode,
   findBusinessById,
   findBusinessForOwner,
   findUserByEmail,
   findUserByGoogleId,
   findUserById,
+  getGmailAccessToken,
+  getGmailConnection,
+  gmailAuthorizeUrl,
+  GmailReauthRequiredError,
   hashPassword,
   isBusinessOwnedByUser,
   isGoogleSignInConfigured,
+  isGmailSendConfigured,
   linkGoogleIdToUser,
   listBusinessesForOwner,
+  saveGmailConnection,
   sessionCookieName,
   sessionCookieOptions,
   clearSessionCookieOptions,
+  signGmailOAuthState,
   signSession,
+  verifyGmailOAuthState,
   verifyGoogleCredential,
   verifyPassword,
   verifySession,
 } from './auth.js';
+import { findBlocklistedTerms } from './blocklist.js';
 import { getBusinessSettings, saveBusinessSettings, uploadsDir } from './business.js';
 import { pool, withTransaction } from './db.js';
+import { quotePdfFilename } from './filename.js';
+import { composeQuoteEmail, DEFAULT_BODY, sendComposedEmail } from './mail.js';
 import { nextQuoteNumber, peekNextQuoteNumber } from './numbering.js';
 import { todayInProfileCalendar } from './today.js';
 import { buildQuoteHtml, renderQuotePdf } from './pdf.js';
@@ -76,6 +90,17 @@ function validateDiscount(discount: Discount | undefined | null): string | null 
 // migration - swapping this to a single value the moment a new domain is bought would break
 // CORS for whichever origin is still actually live until the new domain is attached in Vercel.
 const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? 'http://localhost:5183').split(',').map((o) => o.trim());
+
+// Regression guard, not a runtime request-path check: this app never labels a quote-adjacent
+// action with these words in anything it authors itself (defaults, filenames, UI copy, history
+// text) - a legal boundary, not style. Deliberately does NOT run against operator-typed
+// subject/body (see send-gmail route) - a customer literally named "Bill" must never make a send fail.
+for (const template of [DEFAULT_BODY, 'Your quote ']) {
+  const hits = findBlocklistedTerms(template);
+  if (hits.length > 0) {
+    throw new Error(`App-authored email copy contains blocklisted term(s): ${hits.join(', ')}`);
+  }
+}
 
 const app = express();
 // Fly puts one reverse-proxy hop in front of this app; without trust proxy, express-rate-limit
@@ -297,6 +322,7 @@ interface RequestRow {
   business_id: string;
   customer_name: string;
   company_name: string | null;
+  customer_email: string | null;
   delivery_address: string | null;
   billing_address: string | null;
   created_at: string;
@@ -382,6 +408,7 @@ async function loadQuote(businessId: string, quoteId: string) {
     ? {
         customerName: requestRow.customer_name,
         companyName: requestRow.company_name,
+        customerEmail: requestRow.customer_email,
         deliveryAddress: requestRow.delivery_address,
         billingAddress: requestRow.billing_address,
       }
@@ -396,19 +423,28 @@ app.use('/api/business', requireAuth);
 app.use('/api/dashboard', requireAuth);
 
 app.post('/api/requests', async (req, res) => {
-  const { customerName, companyName, deliveryAddress, billingAddress } = req.body ?? {};
+  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
   const id = randomUUID();
   await pool.query(
-    `INSERT INTO requests (id, business_id, customer_name, company_name, delivery_address, billing_address, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, req.businessId!, customerName, companyName ?? null, deliveryAddress ?? null, billingAddress ?? null, new Date().toISOString()],
+    `INSERT INTO requests (id, business_id, customer_name, company_name, customer_email, delivery_address, billing_address, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      id,
+      req.businessId!,
+      customerName,
+      companyName ?? null,
+      customerEmail ?? null,
+      deliveryAddress ?? null,
+      billingAddress ?? null,
+      new Date().toISOString(),
+    ],
   );
 
-  res.status(201).json({ id, customerName, companyName, deliveryAddress, billingAddress });
+  res.status(201).json({ id, customerName, companyName, customerEmail, deliveryAddress, billingAddress });
 });
 
 app.put('/api/requests/:id', async (req, res) => {
@@ -418,18 +454,33 @@ app.put('/api/requests/:id', async (req, res) => {
   ]);
   if (!rows[0]) return res.status(404).json({ error: 'request not found' });
 
-  const { customerName, companyName, deliveryAddress, billingAddress } = req.body ?? {};
+  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
   await pool.query(
-    `UPDATE requests SET customer_name = $1, company_name = $2, delivery_address = $3, billing_address = $4
-     WHERE id = $5 AND business_id = $6`,
-    [customerName, companyName ?? null, deliveryAddress ?? null, billingAddress ?? null, req.params.id, req.businessId!],
+    `UPDATE requests SET customer_name = $1, company_name = $2, customer_email = $3, delivery_address = $4, billing_address = $5
+     WHERE id = $6 AND business_id = $7`,
+    [
+      customerName,
+      companyName ?? null,
+      customerEmail ?? null,
+      deliveryAddress ?? null,
+      billingAddress ?? null,
+      req.params.id,
+      req.businessId!,
+    ],
   );
 
-  res.json({ id: req.params.id, customerName, companyName: companyName ?? null, deliveryAddress: deliveryAddress ?? null, billingAddress: billingAddress ?? null });
+  res.json({
+    id: req.params.id,
+    customerName,
+    companyName: companyName ?? null,
+    customerEmail: customerEmail ?? null,
+    deliveryAddress: deliveryAddress ?? null,
+    billingAddress: billingAddress ?? null,
+  });
 });
 
 app.get('/api/requests', async (req, res) => {
@@ -446,6 +497,7 @@ app.get('/api/requests', async (req, res) => {
         id: row.id,
         customerName: row.customer_name,
         companyName: row.company_name,
+        customerEmail: row.customer_email,
         deliveryAddress: row.delivery_address,
         billingAddress: row.billing_address,
         createdAt: row.created_at,
@@ -771,16 +823,222 @@ app.get('/api/quotes/:id/pdf', requireAuth, async (req, res) => {
 
   const business = await getBusinessSettings(req.businessId!);
   const html = buildQuoteHtml(loaded.quote, loaded.result, business, loaded.customer);
+  const filename = quotePdfFilename(loaded.quote.quoteNumber, loaded.customer?.companyName ?? null);
 
   try {
     const pdfPath = await renderQuotePdf(loaded.quoteRow.id, html);
     await pool.query('UPDATE quotes SET pdf_path = $1 WHERE id = $2', [pdfPath, loaded.quoteRow.id]);
+    // Downloaded does not mean sent - a separate "Mark as sent" action records that explicitly.
+    await pool.query(
+      `INSERT INTO send_events (id, quote_id, business_id, method, sent_by, sent_at, outcome)
+       VALUES ($1, $2, $3, 'manual', $4, $5, 'downloaded')`,
+      [randomUUID(), loaded.quoteRow.id, req.businessId!, req.userId!, new Date().toISOString()],
+    );
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${loaded.quote.quoteNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.sendFile(pdfPath);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'PDF generation failed' });
   }
+});
+
+app.post('/api/quotes/:id/mark-sent', requireAuth, async (req, res) => {
+  const loaded = await loadQuote(req.businessId!, req.params.id);
+  if (!loaded) return res.status(404).json({ error: 'quote not found' });
+
+  await pool.query(
+    `INSERT INTO send_events (id, quote_id, business_id, method, sent_by, sent_at, outcome)
+     VALUES ($1, $2, $3, 'manual', $4, $5, 'marked_sent')`,
+    [randomUUID(), loaded.quoteRow.id, req.businessId!, req.userId!, new Date().toISOString()],
+  );
+  res.status(201).json({ ok: true });
+});
+
+app.get('/api/quotes/:id/send-events', requireAuth, async (req, res) => {
+  const loaded = await loadQuote(req.businessId!, req.params.id);
+  if (!loaded) return res.status(404).json({ error: 'quote not found' });
+
+  const { rows } = await pool.query<{
+    id: string;
+    method: string;
+    recipient_email: string | null;
+    sent_by_name: string | null;
+    sent_by_email: string;
+    sent_at: string;
+    outcome: string;
+    gmail_message_id: string | null;
+    error_detail: string | null;
+  }>(
+    `SELECT se.id, se.method, se.recipient_email, u.name as sent_by_name, u.email as sent_by_email,
+            se.sent_at, se.outcome, se.gmail_message_id, se.error_detail
+     FROM send_events se
+     JOIN users u ON u.id = se.sent_by
+     WHERE se.quote_id = $1 AND se.business_id = $2
+     ORDER BY se.sent_at DESC`,
+    [req.params.id, req.businessId!],
+  );
+
+  const events = rows.map((row) => ({
+    id: row.id,
+    method: row.method,
+    recipientEmail: row.recipient_email,
+    sentByName: row.sent_by_name ?? row.sent_by_email,
+    sentAt: row.sent_at,
+    outcome: row.outcome,
+    gmailMessageId: row.gmail_message_id,
+    errorDetail: row.error_detail,
+  }));
+
+  // Server-side single source of truth for default subject/body, so the frontend never
+  // hardcodes the "valid for 30 days" copy itself.
+  const defaultSubject = `Your quote ${loaded.quote.quoteNumber}`;
+  res.json({ events, defaultSubject, defaultBody: DEFAULT_BODY });
+});
+
+// ---------------------------------------------------------------------------
+// Gmail send: separate incremental-consent OAuth flow, distinct from sign-in.
+// ---------------------------------------------------------------------------
+
+app.get('/api/auth/google/gmail/status', requireAuth, async (req, res) => {
+  const connection = await getGmailConnection(req.businessId!);
+  res.json({ connected: Boolean(connection), email: connection?.google_account_email ?? null });
+});
+
+app.get('/api/auth/google/gmail/authorize', requireAuth, (req, res) => {
+  if (!isGmailSendConfigured()) {
+    return res.status(400).json({ error: 'Gmail send is not configured on the server' });
+  }
+  const quoteId = typeof req.query.quoteId === 'string' ? req.query.quoteId : '';
+  const nonce = randomBytes(16).toString('base64url');
+  const state = signGmailOAuthState({ businessId: req.businessId!, quoteId, nonce });
+  res.cookie('gmail_oauth_nonce', nonce, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 10 * 60 * 1000,
+  });
+  res.redirect(gmailAuthorizeUrl(state));
+});
+
+app.get('/api/auth/google/callback', requireAuth, async (req, res) => {
+  const failClosed = (reason: string) => {
+    res.clearCookie('gmail_oauth_nonce');
+    const quoteId = typeof req.query.state === 'string' ? parsedQuoteIdFromState : '';
+    console.error('Gmail OAuth callback failed:', reason);
+    res.redirect(`${WEB_ORIGINS[0]}/quotes/${quoteId || ''}?gmail=error`);
+  };
+
+  const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
+  const state = verifyGmailOAuthState(stateParam);
+  const parsedQuoteIdFromState = state?.quoteId ?? '';
+  if (!state) return failClosed('invalid or expired state token');
+
+  const cookieNonce = req.cookies?.gmail_oauth_nonce;
+  const nonceBuf = Buffer.from(state.nonce || '');
+  const cookieBuf = Buffer.from(cookieNonce || '');
+  if (!cookieNonce || nonceBuf.length !== cookieBuf.length || !timingSafeEqual(nonceBuf, cookieBuf)) {
+    return failClosed('nonce mismatch (missing/expired cookie, or CSRF attempt)');
+  }
+
+  // Operator switched business profiles in another tab between clicking Connect and Google
+  // redirecting back - fail closed rather than attaching the new Google account to the wrong business.
+  if (state.businessId !== req.businessId) {
+    res.clearCookie('gmail_oauth_nonce');
+    return res.redirect(`${WEB_ORIGINS[0]}/quotes/${state.quoteId}?gmail=business_mismatch`);
+  }
+
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  if (!code) return failClosed('no authorization code in callback');
+
+  try {
+    const { refreshToken, email } = await exchangeGmailCode(code);
+    await saveGmailConnection({
+      businessId: req.businessId!,
+      googleAccountEmail: email,
+      refreshToken,
+      connectedByUserId: req.userId!,
+    });
+    res.clearCookie('gmail_oauth_nonce');
+    res.redirect(`${WEB_ORIGINS[0]}/quotes/${state.quoteId}?gmail=connected`);
+  } catch (err) {
+    failClosed(err instanceof Error ? err.message : 'token exchange failed');
+  }
+});
+
+app.post('/api/auth/google/gmail/disconnect', requireAuth, async (req, res) => {
+  await deleteGmailConnection(req.businessId!);
+  res.status(204).end();
+});
+
+app.post('/api/quotes/:id/send-gmail', requireAuth, async (req, res) => {
+  const loaded = await loadQuote(req.businessId!, req.params.id);
+  if (!loaded) return res.status(404).json({ error: 'quote not found' });
+
+  const { to, subject, body } = req.body ?? {};
+  if (!to || !subject || !body) {
+    return res.status(400).json({ error: 'to, subject, and body are required' });
+  }
+
+  const connection = await getGmailConnection(req.businessId!);
+  if (!connection) {
+    return res.status(400).json({ error: 'gmail_not_connected' });
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getGmailAccessToken(req.businessId!);
+  } catch (err) {
+    if (err instanceof GmailReauthRequiredError) {
+      await pool.query(
+        `INSERT INTO send_events (id, quote_id, business_id, method, recipient_email, sent_by, sent_at, outcome, error_detail)
+         VALUES ($1, $2, $3, 'gmail', $4, $5, $6, 'failed', $7)`,
+        [randomUUID(), loaded.quoteRow.id, req.businessId!, to, req.userId!, new Date().toISOString(), 'Google authorization was revoked'],
+      );
+      return res.status(409).json({ error: 'gmail_reauth_required' });
+    }
+    throw err;
+  }
+
+  const business = await getBusinessSettings(req.businessId!);
+  const html = buildQuoteHtml(loaded.quote, loaded.result, business, loaded.customer);
+  const pdfPath = await renderQuotePdf(loaded.quoteRow.id, html);
+  const pdfBytes = readFileSync(pdfPath);
+  const filename = quotePdfFilename(loaded.quote.quoteNumber, loaded.customer?.companyName ?? null);
+
+  const fromAddress = connection.google_account_email;
+  const fromDisplay = business.legalName ? `${business.legalName} <${fromAddress}>` : fromAddress;
+
+  const email = composeQuoteEmail({
+    to,
+    subject,
+    body,
+    from: fromDisplay,
+    attachmentFilename: filename,
+    pdfBytes,
+  });
+
+  const result = await sendComposedEmail(email, async () => accessToken);
+
+  await pool.query(
+    `INSERT INTO send_events (id, quote_id, business_id, method, recipient_email, sent_by, sent_at, outcome, gmail_message_id, error_detail)
+     VALUES ($1, $2, $3, 'gmail', $4, $5, $6, $7, $8, $9)`,
+    [
+      randomUUID(),
+      loaded.quoteRow.id,
+      req.businessId!,
+      to,
+      req.userId!,
+      new Date().toISOString(),
+      result.outcome,
+      result.gmailMessageId ?? null,
+      result.errorDetail ?? null,
+    ],
+  );
+
+  if (result.outcome === 'failed') {
+    return res.status(502).json({ error: result.errorDetail ?? 'Gmail send failed' });
+  }
+  res.status(201).json({ outcome: result.outcome, gmailMessageId: result.gmailMessageId });
 });
 
 // Catch-all JSON error handler — required now that DB calls are async: express-async-errors
