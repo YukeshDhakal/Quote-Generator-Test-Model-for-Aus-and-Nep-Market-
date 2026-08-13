@@ -179,6 +179,8 @@ export function buildQuoteHtml(
 
 let browserPromise: Promise<Browser> | null = null;
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     // The container runs as root (no USER directive in the Dockerfile), and Chromium refuses to
@@ -189,17 +191,18 @@ function getBrowser(): Promise<Browser> {
     // showed ~9MB free at idle) - page.setContent() still hung until Puppeteer's own 30s
     // navigation timeout instead of rendering. --single-process --no-zygote avoids spawning
     // Chromium's normal renderer/GPU/zygote process tree, which is the standard mitigation for
-    // running headless Chrome in <1GB-memory environments. If PDF generation is still
-    // unreliable after this, the fix is a bigger Fly VM (fly.toml [[vm]] memory), not another
-    // launch flag - don't keep guessing flags past this point.
+    // running headless Chrome in <1GB-memory environments.
+    //
+    // --single-process is specifically a Fly-container workaround, not a general-purpose flag -
+    // it crashes the renderer on local/Windows Chromium builds (confirmed live: "Protocol error:
+    // Connection closed" on the very first render, every time), so it's gated to production only.
     browserPromise = puppeteer.launch({
       headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--single-process',
-        '--no-zygote',
+        ...(isProduction ? ['--single-process', '--no-zygote'] : []),
       ],
     });
     browserPromise.catch(() => {
