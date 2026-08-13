@@ -6,12 +6,37 @@ Read this file first in any new session. Keep it short — facts, not narration.
 
 Building toward the "full scale" multi-tenant SaaS version (user chose this
 early rather than staying single-tenant longer). Quote functionality is
-complete; Invoice has not been started.
+complete; Invoice has not been started. **Live in production** as of
+2026-08-12: web on Vercel (quoteengine.dev), API on Fly.io
+(api.quoteengine.dev). Onboarding real testers now.
 
 ## Current objective
 
 Invoice feature (separate entity from Quote, legally-significant sequential
 numbering — see `.claude/state/decisions.md`).
+
+## Production infra (2026-08-12)
+
+- **Web**: Vercel project `quote-generator-test-model-for-aus-and-nep-market-api`
+  (misleading name, it's actually the web app — Root Directory
+  `packages/web`), aliased to `www.quoteengine.dev` (apex redirects to www).
+  `VITE_API_URL=https://api.quoteengine.dev`.
+- **API**: Fly.io app `quoteengine`, custom domain `api.quoteengine.dev`
+  (same registrable domain as the web app → session cookie is same-site,
+  `SameSite=Lax`). `min_machines_running=1`, `auto_stop_machines=off` —
+  do NOT re-enable scale-to-zero, it was silently dropping live requests
+  (Fly's proxy gives up mid stop/start cycle) and was a real cause of
+  intermittent login/signup failures, not just slow cold starts.
+  VM: `shared-cpu-1x`, 1GB memory — Chromium/Puppeteer needs the
+  headroom, 512MB was not enough (see discoveries.md).
+- **Google OAuth**: consent screen published to "In production" (was
+  stuck in "Testing", capped at 100 allowlisted test users — blocked
+  every other new user with a policy-violation error). Client ID
+  `650496659289-...`, project number `650496659289`. Only requests
+  non-sensitive scopes (email/profile via ID-token flow), so
+  publishing needed no Google review and has no user cap.
+- Domain `quoteengine.dev` is registered + DNS-hosted on Vercel
+  (`vercel dns` CLI works for record changes, not just the registrar UI).
 
 ## Progress (high level)
 
@@ -42,7 +67,8 @@ numbering — see `.claude/state/decisions.md`).
 
 ## Active blockers
 
-None.
+None. Production confirmed working end-to-end (login + PDF export) by
+the user as of 2026-08-12.
 
 ## Next recommended task
 

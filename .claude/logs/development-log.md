@@ -48,3 +48,15 @@ unless you need history.
   parallel testing (they created a second "Aussie Trading" AU profile
   independently). Full regression (19 engine tests + both typechecks)
   green at end of session.
+- 2026-08-12 — Production went live (Vercel + Fly.io + quoteengine.dev)
+  and a batch of real deployment bugs surfaced from actual tester
+  traffic: broken logout, third-party-cookie login failures (fixed by
+  migrating the API to api.quoteengine.dev, same-site with the web
+  app), PDF export failing four different ways in the container
+  (sandbox, /dev/shm, single-process, memory — see discoveries.md),
+  Fly scale-to-zero silently dropping live requests, and the Google
+  OAuth consent screen stuck in Testing (100-user cap, blocked every
+  non-test-user). All fixed and confirmed working end-to-end by the
+  user. Two other concurrent sessions/agents were independently fixing
+  the same PDF bug via GitHub PRs during this session — reconciled via
+  rebase each time rather than duplicating the work.

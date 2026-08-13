@@ -42,3 +42,51 @@ Reusable technical findings. Summarized, not raw research dumps.
   don't divide evenly (e.g. 7 × 10.005 → 70.07 line-rounded vs 70.04
   total-rounded). Always test both modes explicitly, don't assume they
   converge.
+- **Cross-domain cookies + Fly scale-to-zero (2026-08-12 production
+  incident)**: three compounding causes behind "testers can't log in":
+  (1) web (Vercel) and API (`quoteengine.fly.dev`) were on different
+  top-level domains → session cookie was third-party, blocked by Safari
+  ITP/Brave/Chrome's rollout regardless of correct `SameSite=None;
+  Secure`. Fixed by moving the API to `api.quoteengine.dev` (same
+  registrable domain as the web app) and switching to `SameSite=Lax`.
+  (2) `res.clearCookie(name)` without echoing the original
+  `secure`/`sameSite` options doesn't actually clear a
+  `Secure`/`SameSite=None` cookie — browsers won't let a
+  non-Secure `Set-Cookie` overwrite a Secure one ("leave secure cookies
+  alone"). `clearCookie` needs the same attributes as the original
+  `res.cookie` call (minus `maxAge`, or Express recomputes `expires` 30
+  days out instead of clearing). (3) `auto_stop_machines=stop` +
+  `min_machines_running=0` was letting Fly's proxy give up on requests
+  mid stop/start transition (`"failed to connect to machine: gave up
+  after 15 attempts"`) — a straight 502 to whoever's request landed at
+  the wrong moment, affecting *any* endpoint, not just slow ones. Fixed
+  by keeping one machine always running.
+- **Puppeteer/Chromium in a Fly.io container** (production PDF export,
+  same incident): needed FOUR stacked fixes before it was reliable, in
+  order of what surfaces first: `--no-sandbox --disable-setuid-sandbox`
+  (container runs as root, no `USER` in Dockerfile), `--disable-dev-shm-usage`
+  (Docker's default 64MB `/dev/shm` is too small, causes a hang rather
+  than a crash), `--single-process --no-zygote` (avoids Chromium's
+  renderer/GPU/zygote process tree — needed under ~1GB memory), and
+  bumping the Fly VM from 512MB to 1GB (confirmed via `free -m` over
+  `flyctl ssh console`: ~9MB free at idle on 512MB before Chromium even
+  starts). Any one fix alone still failed, either immediately or with a
+  30s timeout.
+- **`tsx` as a runtime dependency, not a devDependency**: this project
+  runs its TypeScript server directly via `npx tsx` in production (no
+  build step). The Dockerfile sets `NODE_ENV=production` *before*
+  `npm ci`, which skips `devDependencies` — so `tsx` silently wasn't in
+  the built image, and every cold boot fell through to `npx` fetching
+  it fresh from the registry (`npm warn exec ... will be installed`),
+  adding real latency to every restart. Since `tsx` is the actual
+  runtime interpreter here (not a dev tool), it belongs in
+  `dependencies`.
+- **Vercel CLI in an npm-workspaces monorepo**: `vercel link` and
+  `vercel deploy` must be run from the *same* directory — link from the
+  monorepo root (not the subpackage), even though the project's Root
+  Directory setting is `packages/web`. Linking from inside
+  `packages/web` and then deploying from there double-applies the Root
+  Directory (looks for `packages/web/packages/web`, fails with
+  "Root Directory does not exist"). Also: `npx vercel <cmd>` run from
+  a fresh shell in this environment doesn't reliably inherit `cd` from
+  a prior tool call — always `cd` explicitly in the same command.
