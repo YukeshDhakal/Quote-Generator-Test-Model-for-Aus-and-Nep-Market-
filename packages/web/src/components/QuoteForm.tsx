@@ -44,6 +44,7 @@ function lineItemsToDraft(items: LineItem[]): DraftLineItem[] {
 export interface QuoteFormInitial {
   customerName?: string
   companyName?: string
+  customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
   documentTypeKey?: string
@@ -56,6 +57,7 @@ export interface QuoteFormInitial {
 export interface QuoteFormPayload {
   customerName: string
   companyName?: string
+  customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
   documentTypeKey: string
@@ -78,6 +80,7 @@ interface QuoteFormProps {
 export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction, initial, onSubmit }: QuoteFormProps) {
   const [customerName, setCustomerName] = useState(initial?.customerName ?? '')
   const [companyName, setCompanyName] = useState(initial?.companyName ?? '')
+  const [customerEmail, setCustomerEmail] = useState(initial?.customerEmail ?? '')
   const [deliveryAddress, setDeliveryAddress] = useState(initial?.deliveryAddress ?? '')
   const [billingAddress, setBillingAddress] = useState(initial?.billingAddress ?? '')
 
@@ -165,6 +168,7 @@ export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction,
       await onSubmit({
         customerName,
         companyName: companyName || undefined,
+        customerEmail: customerEmail || undefined,
         deliveryAddress: deliveryAddress || undefined,
         billingAddress: billingAddress || undefined,
         documentTypeKey,
@@ -208,6 +212,15 @@ export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction,
           <div className="space-y-2">
             <Label htmlFor="companyName">Company</Label>
             <Input id="companyName" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="customerEmail">Email</Label>
+            <Input
+              id="customerEmail"
+              type="email"
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="deliveryAddress">Delivery address</Label>

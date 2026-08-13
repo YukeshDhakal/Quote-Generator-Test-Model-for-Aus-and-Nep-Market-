@@ -16,6 +16,7 @@ export function NewQuote() {
     const req = await createRequest({
       customerName: payload.customerName,
       companyName: payload.companyName,
+      customerEmail: payload.customerEmail,
       deliveryAddress: payload.deliveryAddress,
       billingAddress: payload.billingAddress,
     })

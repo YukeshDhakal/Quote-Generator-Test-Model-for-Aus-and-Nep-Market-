@@ -32,6 +32,7 @@ export function EditQuote() {
     await updateRequest(data.quoteRow.request_id, {
       customerName: payload.customerName,
       companyName: payload.companyName,
+      customerEmail: payload.customerEmail,
       deliveryAddress: payload.deliveryAddress,
       billingAddress: payload.billingAddress,
     })
@@ -56,6 +57,7 @@ export function EditQuote() {
       initial={{
         customerName: data.customer?.customerName,
         companyName: data.customer?.companyName ?? undefined,
+        customerEmail: data.customer?.customerEmail ?? undefined,
         deliveryAddress: data.customer?.deliveryAddress ?? undefined,
         billingAddress: data.customer?.billingAddress ?? undefined,
         documentTypeKey: data.quote.documentTypeKey,
