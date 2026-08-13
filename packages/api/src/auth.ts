@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { pool, withTransaction } from './db.js';
+import { encryptToken, decryptToken } from './crypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const secretPath = join(__dirname, '..', 'data', '.session-secret');
@@ -227,6 +228,142 @@ export async function verifyGoogleCredential(credential: string): Promise<{ sub:
     throw new Error('Invalid Google credential');
   }
   return { sub: payload.sub, email: payload.email, name: payload.name };
+}
+
+// ---------------------------------------------------------------------------
+// Gmail send (separate authorization-code + refresh-token flow, distinct from the ID-token
+// sign-in flow above - requires a client secret, which sign-in never needed).
+// ---------------------------------------------------------------------------
+
+const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.send'];
+// The API's actual local dev port, not the illustrative :3000 some examples use - must match
+// exactly what's registered as an authorized redirect URI in Google Cloud Console.
+export const GMAIL_REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:5187/api/auth/google/callback';
+
+let gmailOAuthClient: OAuth2Client | null = null;
+
+export function isGmailSendConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+function getGmailOAuthClient(): OAuth2Client {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error('GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are not configured on the server');
+  }
+  gmailOAuthClient ??= new OAuth2Client(clientId, clientSecret, GMAIL_REDIRECT_URI);
+  return gmailOAuthClient;
+}
+
+/** Builds the URL to redirect the operator to for incremental gmail.send consent. `state` should
+ * be a signed, short-lived token binding this authorize attempt to the current business+quote
+ * (see server.ts's /gmail/authorize route) - verified on the way back in exchangeGmailCode's caller. */
+export function gmailAuthorizeUrl(state: string): string {
+  return getGmailOAuthClient().generateAuthUrl({
+    access_type: 'offline',
+    // Forces Google to reissue a refresh_token even if this business previously granted this
+    // scope - without it, a reconnect after a revoke could silently come back with no refresh
+    // token at all.
+    prompt: 'consent',
+    scope: GMAIL_SCOPES,
+    redirect_uri: GMAIL_REDIRECT_URI,
+    state,
+  });
+}
+
+/** Exchanges an authorization code for tokens, and looks up the connected account's own email via
+ * Gmail's users.getProfile (permitted under gmail.send scope alone - avoids requesting
+ * openid/email/profile scopes just to learn the address, keeping consent to gmail.send only). */
+export async function exchangeGmailCode(code: string): Promise<{ refreshToken: string; email: string }> {
+  const client = getGmailOAuthClient();
+  const { tokens } = await client.getToken({ code, redirect_uri: GMAIL_REDIRECT_URI });
+  if (!tokens.refresh_token) {
+    throw new Error('Google did not return a refresh token - disconnect and reconnect to force fresh consent');
+  }
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to read connected Gmail profile (${res.status})`);
+  }
+  const profile = (await res.json()) as { emailAddress?: string };
+  return { refreshToken: tokens.refresh_token, email: profile.emailAddress ?? 'unknown' };
+}
+
+interface GmailConnectionRow {
+  business_id: string;
+  google_account_email: string;
+  refresh_token_encrypted: string;
+  scope: string;
+  connected_by_user_id: string;
+  connected_at: string;
+  updated_at: string;
+}
+
+export async function getGmailConnection(businessId: string): Promise<GmailConnectionRow | undefined> {
+  const { rows } = await pool.query<GmailConnectionRow>('SELECT * FROM gmail_connections WHERE business_id = $1', [
+    businessId,
+  ]);
+  return rows[0];
+}
+
+export async function saveGmailConnection(input: {
+  businessId: string;
+  googleAccountEmail: string;
+  refreshToken: string;
+  connectedByUserId: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const encrypted = encryptToken(input.refreshToken);
+  await pool.query(
+    `INSERT INTO gmail_connections (business_id, google_account_email, refresh_token_encrypted, scope, connected_by_user_id, connected_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $6)
+     ON CONFLICT (business_id) DO UPDATE SET
+       google_account_email = excluded.google_account_email,
+       refresh_token_encrypted = excluded.refresh_token_encrypted,
+       scope = excluded.scope,
+       connected_by_user_id = excluded.connected_by_user_id,
+       updated_at = excluded.updated_at`,
+    [input.businessId, input.googleAccountEmail, encrypted, GMAIL_SCOPES.join(' '), input.connectedByUserId, now],
+  );
+}
+
+export async function deleteGmailConnection(businessId: string): Promise<void> {
+  // Only this table is touched - login (users/sessions) and Download (quotes/pdf) have no
+  // dependency on gmail_connections, so disconnecting structurally cannot break either.
+  await pool.query('DELETE FROM gmail_connections WHERE business_id = $1', [businessId]);
+}
+
+/** Thrown when the stored refresh token no longer works (revoked, expired, or scope changed) -
+ * callers should turn this into a clean re-auth prompt, never a 500. */
+export class GmailReauthRequiredError extends Error {}
+
+/** Mints a fresh access token from the stored (encrypted) refresh token. No access token is ever
+ * stored at rest - minting one per send is one extra Google round-trip, negligible at this app's
+ * volume, and avoids an entire class of expiry-bookkeeping bugs plus one more sensitive value in the DB. */
+export async function getGmailAccessToken(businessId: string): Promise<string> {
+  const connection = await getGmailConnection(businessId);
+  if (!connection) {
+    throw new GmailReauthRequiredError('No Gmail connection for this business');
+  }
+  const refreshToken = decryptToken(connection.refresh_token_encrypted);
+  const client = getGmailOAuthClient();
+  client.setCredentials({ refresh_token: refreshToken });
+  try {
+    const { token } = await client.getAccessToken();
+    if (!token) {
+      throw new GmailReauthRequiredError('Google did not return an access token');
+    }
+    return token;
+  } catch (err) {
+    if (err instanceof GmailReauthRequiredError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('invalid_grant') || message.includes('unauthorized_client')) {
+      throw new GmailReauthRequiredError('Google authorization was revoked or expired');
+    }
+    throw err;
+  }
 }
 
 export type { UserRow };
