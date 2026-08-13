@@ -21,6 +21,7 @@ export interface RequestRecord {
   id: string
   customerName: string
   companyName: string | null
+  customerEmail: string | null
   deliveryAddress: string | null
   billingAddress: string | null
   createdAt: string
@@ -54,6 +55,7 @@ export interface QuoteDetail {
   customer: {
     customerName: string
     companyName: string | null
+    customerEmail: string | null
     deliveryAddress: string | null
     billingAddress: string | null
   } | null
@@ -62,6 +64,7 @@ export interface QuoteDetail {
 export function createRequest(input: {
   customerName: string
   companyName?: string
+  customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
 }) {
@@ -70,7 +73,13 @@ export function createRequest(input: {
 
 export function updateRequest(
   id: string,
-  input: { customerName: string; companyName?: string; deliveryAddress?: string; billingAddress?: string },
+  input: {
+    customerName: string
+    companyName?: string
+    customerEmail?: string
+    deliveryAddress?: string
+    billingAddress?: string
+  },
 ) {
   return request<{ id: string }>(`/requests/${id}`, { method: 'PUT', body: JSON.stringify(input) })
 }
@@ -248,6 +257,61 @@ export interface DashboardData {
 
 export function getDashboard() {
   return request<DashboardData>('/dashboard')
+}
+
+// ---------------------------------------------------------------------------
+// Quote delivery: Download PDF + Send via Gmail
+// ---------------------------------------------------------------------------
+
+export interface SendEvent {
+  id: string
+  method: 'manual' | 'gmail'
+  recipientEmail: string | null
+  sentByName: string
+  sentAt: string
+  outcome: 'downloaded' | 'marked_sent' | 'accepted' | 'failed'
+  gmailMessageId: string | null
+  errorDetail: string | null
+}
+
+export interface SendEventsResponse {
+  events: SendEvent[]
+  defaultSubject: string
+  defaultBody: string
+}
+
+export function listSendEvents(quoteId: string) {
+  return request<SendEventsResponse>(`/quotes/${quoteId}/send-events`)
+}
+
+export function markSent(quoteId: string) {
+  return request<{ ok: boolean }>(`/quotes/${quoteId}/mark-sent`, { method: 'POST' })
+}
+
+export interface GmailStatus {
+  connected: boolean
+  email: string | null
+}
+
+export function getGmailStatus() {
+  return request<GmailStatus>('/auth/google/gmail/status')
+}
+
+/** URL-builder only, no fetch - needs a real top-level browser navigation to reach Google's
+ * consent screen, same reasoning as quotePdfUrl. */
+export function gmailAuthorizeUrl(quoteId: string) {
+  return `${API_BASE}/auth/google/gmail/authorize?quoteId=${encodeURIComponent(quoteId)}`
+}
+
+export function sendViaGmail(quoteId: string, input: { to: string; subject: string; body: string }) {
+  return request<{ outcome: string; gmailMessageId: string | null }>(`/quotes/${quoteId}/send-gmail`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function disconnectGmail() {
+  return request<void>('/auth/google/gmail/disconnect', { method: 'POST' })
 }
 
 export type { DocumentTypeDef }
