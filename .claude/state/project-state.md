@@ -29,6 +29,24 @@ numbering — see `.claude/state/decisions.md`).
   intermittent login/signup failures, not just slow cold starts.
   VM: `shared-cpu-1x`, 1GB memory — Chromium/Puppeteer needs the
   headroom, 512MB was not enough (see discoveries.md).
+- **Database**: Postgres via Supabase, **not** node:sqlite anymore
+  (migrated 2026-08-13, plan at `.claude/plans/mossy-drifting-whale.md`).
+  Two projects: `quoteengine-dev` and `quoteengine-prod` (Supabase org
+  "YukeshDhakal's Org"). API connects via `pg.Pool` + a `withTransaction`
+  helper (`packages/api/src/db.ts`) using `DATABASE_URL` — the **Session
+  Pooler** connection string (`aws-0-ap-northeast-2.pooler.supabase.com:5432`),
+  not the direct connection (`db.<ref>.supabase.co:5432`), which is
+  IPv6-only and unreachable from this dev machine/Fly without the paid
+  IPv4 add-on. Schema is tracked at
+  `packages/api/supabase/migrations/0001_init_schema.sql` — apply any
+  future schema change there and run it via the Supabase SQL Editor on
+  both projects, there's no more runtime `CREATE TABLE IF NOT EXISTS`.
+  Admin GUI: Supabase Studio (Table Editor + SQL Editor) — this was the
+  actual point of the migration, the user wanted ongoing DB visibility.
+  Old SQLite file/volume (`quoteengine_data`) is still attached to the
+  Fly app, untouched, as a rollback artifact — not read by the app
+  anymore, safe to remove after a few weeks of stable Postgres
+  operation.
 - **Google OAuth**: consent screen published to "In production" (was
   stuck in "Testing", capped at 100 allowlisted test users — blocked
   every other new user with a policy-violation error). Client ID
@@ -68,7 +86,9 @@ numbering — see `.claude/state/decisions.md`).
 ## Active blockers
 
 None. Production confirmed working end-to-end (login + PDF export) by
-the user as of 2026-08-12.
+the user as of 2026-08-12, and again after the Postgres migration on
+2026-08-13 (verified via curl smoke tests + a real-user login-lookup
+check against production; not re-verified via the browser).
 
 ## Next recommended task
 

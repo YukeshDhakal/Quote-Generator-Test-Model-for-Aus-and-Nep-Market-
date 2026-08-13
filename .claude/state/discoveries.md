@@ -90,3 +90,32 @@ Reusable technical findings. Summarized, not raw research dumps.
   "Root Directory does not exist"). Also: `npx vercel <cmd>` run from
   a fresh shell in this environment doesn't reliably inherit `cd` from
   a prior tool call — always `cd` explicitly in the same command.
+- **Supabase direct connection is IPv6-only** by default (`db.<ref>.supabase.co:5432`
+  resolves to an AAAA record only, no A record) unless the project has
+  the paid IPv4 add-on. Fails as `getaddrinfo ENOTFOUND` from networks/
+  machines without working IPv6 (this dev machine, confirmed). Fix:
+  use the **Session Pooler** connection string instead
+  (`aws-0-<region>.pooler.supabase.com:5432`, user becomes
+  `postgres.<project-ref>`) — still session-mode (not the 6543
+  transaction pooler), so multi-statement transactions still work, and
+  it's IPv4-compatible.
+- **`fly scale count 0` destroys the machine, it doesn't just stop it**
+  (contrary to what "start of a maintenance window" suggests). The
+  attached volume survives (volumes are independent of machines in
+  Fly's model) and gets reattached to a fresh machine on `scale count
+  1`, but don't assume `count 0` is a quick-resume pause — budget for a
+  full machine recreate + boot on the way back up.
+- **`node:sqlite`'s `DatabaseSync` has no CLI equivalent needed for a
+  WAL checkpoint** — if `sqlite3` isn't installed in the container
+  (it wasn't here), run the checkpoint via Node directly instead:
+  `node -e "const {DatabaseSync}=require('node:sqlite'); const
+  db=new DatabaseSync('path/to.db'); db.exec('PRAGMA
+  wal_checkpoint(TRUNCATE)'); db.close();"` — folds the `-wal` file
+  into the main `.db` file so a subsequent plain file copy is a
+  complete, self-consistent snapshot.
+- **Git Bash mangles absolute Unix remote paths** in commands like
+  `flyctl ssh sftp get /app/data/foo.db ./local.db` — MSYS path
+  conversion rewrites `/app/...` as if it were a local Windows path
+  (`C:/Program Files/Git/app/...`), producing a "file does not exist"
+  error for a path that's actually correct on the remote host. Fix:
+  prefix the command with `MSYS_NO_PATHCONV=1`.

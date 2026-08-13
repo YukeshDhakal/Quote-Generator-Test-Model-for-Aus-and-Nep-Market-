@@ -60,3 +60,17 @@ unless you need history.
   user. Two other concurrent sessions/agents were independently fixing
   the same PDF bug via GitHub PRs during this session — reconciled via
   rebase each time rather than duplicating the work.
+- 2026-08-13 — Migrated the database from node:sqlite to Postgres
+  (Supabase), so the user has an ongoing admin GUI (Table Editor + SQL
+  Editor) instead of needing to download the SQLite file to look at
+  data. Full rewrite of db.ts/auth.ts/business.ts/numbering.ts/server.ts
+  (~50 call sites, plan at .claude/plans/mossy-drifting-whale.md),
+  including a real fix found during the rewrite (Express 4.x has no
+  async-rejection handling — added express-async-errors + error
+  middleware) and a numbering improvement (quote-number allocation now
+  shares a transaction with quote creation, closing a narrow gap-in-
+  sequence bug). Verified end-to-end against quoteengine-dev via a full
+  manual smoke test, then live production data (9 users, 10 businesses,
+  6 quotes) migrated to quoteengine-prod with a maintenance window
+  (~2 minutes), row-count-verified, and confirmed working via a
+  production API check before scaling back up.
