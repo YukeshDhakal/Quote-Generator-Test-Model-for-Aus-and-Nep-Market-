@@ -901,7 +901,9 @@ app.get('/api/quotes/:id/send-events', requireAuth, async (req, res) => {
 
 app.get('/api/auth/google/gmail/status', requireAuth, async (req, res) => {
   const connection = await getGmailConnection(req.businessId!);
-  res.json({ connected: Boolean(connection), email: connection?.google_account_email ?? null });
+  // No email/identity field - gmail.send scope alone can't read which account was connected
+  // (see auth.ts's exchangeGmailCode). The frontend just shows "connected" without an address.
+  res.json({ connected: Boolean(connection) });
 });
 
 app.get('/api/auth/google/gmail/authorize', requireAuth, (req, res) => {
@@ -951,10 +953,9 @@ app.get('/api/auth/google/callback', requireAuth, async (req, res) => {
   if (!code) return failClosed('no authorization code in callback');
 
   try {
-    const { refreshToken, email } = await exchangeGmailCode(code);
+    const { refreshToken } = await exchangeGmailCode(code);
     await saveGmailConnection({
       businessId: req.businessId!,
-      googleAccountEmail: email,
       refreshToken,
       connectedByUserId: req.userId!,
     });
@@ -1005,14 +1006,12 @@ app.post('/api/quotes/:id/send-gmail', requireAuth, async (req, res) => {
   const pdfBytes = readFileSync(pdfPath);
   const filename = quotePdfFilename(loaded.quote.quoteNumber, loaded.customer?.companyName ?? null);
 
-  const fromAddress = connection.google_account_email;
-  const fromDisplay = business.legalName ? `${business.legalName} <${fromAddress}>` : fromAddress;
-
   const email = composeQuoteEmail({
     to,
     subject,
     body,
-    from: fromDisplay,
+    // No `from` - the connected account's address isn't known to us (gmail.send-only scope),
+    // and Gmail auto-fills the From header from the authenticated account when it's omitted.
     attachmentFilename: filename,
     pdfBytes,
   });

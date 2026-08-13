@@ -36,7 +36,6 @@ const METHOD_LABEL: Record<SendEvent['method'], string> = {
 function SendSection({ quoteId, customerEmail }: { quoteId: string; customerEmail: string | null }) {
   const [events, setEvents] = useState<SendEvent[] | null>(null)
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null)
-  const [gmailEmail, setGmailEmail] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -61,10 +60,7 @@ function SendSection({ quoteId, customerEmail }: { quoteId: string; customerEmai
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load send history.'))
     getGmailStatus()
-      .then((s) => {
-        setGmailConnected(s.connected)
-        setGmailEmail(s.email)
-      })
+      .then((s) => setGmailConnected(s.connected))
       .catch(() => {})
   }
 
@@ -155,8 +151,8 @@ function SendSection({ quoteId, customerEmail }: { quoteId: string; customerEmai
           )}
         </div>
 
-        {gmailConnected === true && gmailEmail && (
-          <p className="text-xs text-muted-foreground">Connected as {gmailEmail}.</p>
+        {gmailConnected === true && (
+          <p className="text-xs text-muted-foreground">Google account connected.</p>
         )}
         {markedNote && <p className="text-sm text-muted-foreground">Marked as sent.</p>}
         {notice && <p className="text-sm text-muted-foreground">{notice}</p>}

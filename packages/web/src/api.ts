@@ -290,7 +290,6 @@ export function markSent(quoteId: string) {
 
 export interface GmailStatus {
   connected: boolean
-  email: string | null
 }
 
 export function getGmailStatus() {

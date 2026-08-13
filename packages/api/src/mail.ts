@@ -8,8 +8,12 @@ const OUTBOX_DIR = join(__dirname, '..', 'data', 'outbox');
 
 export interface ComposedEmail {
   to: string;
-  from: string;
-  replyTo: string;
+  // Omitted when the operator's connected address isn't known to us (gmail.send scope alone
+  // can't read it - see auth.ts's exchangeGmailCode). Gmail auto-fills the From header from the
+  // authenticated account when it's absent from the raw message, which is the semantically
+  // correct behavior here, not a fallback: Gmail overrides/rejects a mismatched From anyway.
+  from?: string;
+  replyTo?: string;
   subject: string;
   bodyText: string;
   attachment: { filename: string; content: Buffer };
@@ -21,7 +25,7 @@ export function composeQuoteEmail(input: {
   to: string;
   subject: string;
   body: string;
-  from: string;
+  from?: string;
   attachmentFilename: string;
   pdfBytes: Buffer;
 }): ComposedEmail {
@@ -61,8 +65,8 @@ export function buildRawMimeMessage(email: ComposedEmail): string {
   const boundary = `----=_QuoteEngine_${randomUUID()}`;
   const headers = [
     `To: ${email.to}`,
-    `From: ${email.from}`,
-    `Reply-To: ${email.replyTo}`,
+    ...(email.from ? [`From: ${email.from}`] : []),
+    ...(email.replyTo ? [`Reply-To: ${email.replyTo}`] : []),
     `Subject: ${encodeHeader(email.subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,

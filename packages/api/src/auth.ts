@@ -39,6 +39,30 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
+export interface GmailOAuthState {
+  businessId: string;
+  quoteId: string;
+  nonce: string;
+}
+
+/** Signs a short-lived state token binding a Gmail-connect attempt to the business/quote that
+ * started it, plus a nonce echoed back via an httpOnly cookie - the standard CSRF mitigation for
+ * an OAuth redirect dance, independent of (and in addition to) the session cookie surviving the
+ * round trip. `typ` stops this being confused with a real session JWT even though they share a secret. */
+export function signGmailOAuthState(payload: GmailOAuthState): string {
+  return jwt.sign({ typ: 'gmail_oauth_state', ...payload }, SESSION_SECRET, { expiresIn: '10m' });
+}
+
+export function verifyGmailOAuthState(token: string): GmailOAuthState | null {
+  try {
+    const decoded = jwt.verify(token, SESSION_SECRET) as GmailOAuthState & { typ?: string };
+    if (decoded.typ !== 'gmail_oauth_state') return null;
+    return { businessId: decoded.businessId, quoteId: decoded.quoteId, nonce: decoded.nonce };
+  } catch {
+    return null;
+  }
+}
+
 // The API is mid-migration from quoteengine.fly.dev (cross-site to the web app, needs
 // SameSite=None) to api.quoteengine.dev (same-site, can use SameSite=Lax — see the git history
 // of this line). COOKIE_CROSS_SITE flips the cookie back to None for as long as the web app's
@@ -272,28 +296,23 @@ export function gmailAuthorizeUrl(state: string): string {
   });
 }
 
-/** Exchanges an authorization code for tokens, and looks up the connected account's own email via
- * Gmail's users.getProfile (permitted under gmail.send scope alone - avoids requesting
- * openid/email/profile scopes just to learn the address, keeping consent to gmail.send only). */
-export async function exchangeGmailCode(code: string): Promise<{ refreshToken: string; email: string }> {
+/** Exchanges an authorization code for tokens. Deliberately does NOT look up which Google account
+ * was connected - Gmail's users.getProfile (and every other identity-revealing endpoint) requires
+ * a broader scope than gmail.send alone grants (confirmed live: getProfile 403s under gmail.send-only
+ * consent). Requesting an extra scope (openid/email) just to learn the address would violate the
+ * "gmail.send ONLY" requirement, so the UI shows "Google account connected" without an address
+ * rather than adding a second permission line item to the consent screen. */
+export async function exchangeGmailCode(code: string): Promise<{ refreshToken: string }> {
   const client = getGmailOAuthClient();
   const { tokens } = await client.getToken({ code, redirect_uri: GMAIL_REDIRECT_URI });
   if (!tokens.refresh_token) {
     throw new Error('Google did not return a refresh token - disconnect and reconnect to force fresh consent');
   }
-  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to read connected Gmail profile (${res.status})`);
-  }
-  const profile = (await res.json()) as { emailAddress?: string };
-  return { refreshToken: tokens.refresh_token, email: profile.emailAddress ?? 'unknown' };
+  return { refreshToken: tokens.refresh_token };
 }
 
 interface GmailConnectionRow {
   business_id: string;
-  google_account_email: string;
   refresh_token_encrypted: string;
   scope: string;
   connected_by_user_id: string;
@@ -310,22 +329,20 @@ export async function getGmailConnection(businessId: string): Promise<GmailConne
 
 export async function saveGmailConnection(input: {
   businessId: string;
-  googleAccountEmail: string;
   refreshToken: string;
   connectedByUserId: string;
 }): Promise<void> {
   const now = new Date().toISOString();
   const encrypted = encryptToken(input.refreshToken);
   await pool.query(
-    `INSERT INTO gmail_connections (business_id, google_account_email, refresh_token_encrypted, scope, connected_by_user_id, connected_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $6)
+    `INSERT INTO gmail_connections (business_id, refresh_token_encrypted, scope, connected_by_user_id, connected_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $5)
      ON CONFLICT (business_id) DO UPDATE SET
-       google_account_email = excluded.google_account_email,
        refresh_token_encrypted = excluded.refresh_token_encrypted,
        scope = excluded.scope,
        connected_by_user_id = excluded.connected_by_user_id,
        updated_at = excluded.updated_at`,
-    [input.businessId, input.googleAccountEmail, encrypted, GMAIL_SCOPES.join(' '), input.connectedByUserId, now],
+    [input.businessId, encrypted, GMAIL_SCOPES.join(' '), input.connectedByUserId, now],
   );
 }
 

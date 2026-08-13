@@ -5,9 +5,14 @@ ALTER TABLE requests ADD COLUMN customer_email TEXT;
 
 -- One connection per business (this app's tenancy unit throughout), not per user - the sent-from
 -- Gmail account belongs to the business regardless of which staff member connected it.
+--
+-- No email/identity column: gmail.send scope alone cannot read the connected account's profile
+-- or email address (confirmed live - Gmail's users.getProfile 403s under gmail.send-only
+-- consent), and requesting an additional scope (openid/email) just to learn it would violate the
+-- "gmail.send ONLY" requirement. Gmail auto-fills the From header from the authenticated account
+-- when the raw message omits it, so this isn't needed for sending either.
 CREATE TABLE gmail_connections (
   business_id TEXT PRIMARY KEY REFERENCES businesses(id),
-  google_account_email TEXT NOT NULL,
   refresh_token_encrypted TEXT NOT NULL,
   scope TEXT NOT NULL,
   connected_by_user_id TEXT NOT NULL REFERENCES users(id),
