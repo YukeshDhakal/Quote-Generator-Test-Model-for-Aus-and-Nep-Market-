@@ -3,6 +3,7 @@ import { extname, join } from 'node:path';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
 import {
   AU_PROFILE,
@@ -76,10 +77,47 @@ function validateDiscount(discount: Discount | undefined | null): string | null 
 const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? 'http://localhost:5183').split(',').map((o) => o.trim());
 
 const app = express();
+// Fly puts one reverse-proxy hop in front of this app; without trust proxy, express-rate-limit
+// (and req.ip generally) would see every request as coming from the proxy's own address instead
+// of the real client, either lumping all users into one shared limit or disabling limiting
+// entirely. `1` trusts exactly that one hop's X-Forwarded-For entry, not the whole chain.
+app.set('trust proxy', 1);
 app.use(cors({ origin: WEB_ORIGINS, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(uploadsDir));
+
+// Applies to every /api/* route as a baseline defense against scraping/abuse - generous enough
+// (300 req/15min per IP) that no legitimate usage pattern in this app should ever hit it.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', apiLimiter);
+
+// Tighter limit for signup/Google sign-in - these create accounts/consume the Google
+// verification API, so they get a stricter cap than general API traffic.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please try again later.' },
+});
+
+// Login is the actual brute-force target, so this is the strictest limiter and only counts
+// FAILED attempts (skipSuccessfulRequests) - a legitimate user who mistypes their password once
+// or twice before succeeding shouldn't eat into the same budget an attacker's guesses would.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many login attempts. Please try again later.' },
+});
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -111,7 +149,7 @@ function setSessionCookie(res: Response, userId: string, businessId: string) {
 // Auth
 // ---------------------------------------------------------------------------
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authLimiter, async (req, res) => {
   const { email, password, name, businessName, jurisdiction } = req.body ?? {};
   if (!email || !password) {
     return res.status(400).json({ error: 'email and password are required' });
@@ -139,7 +177,7 @@ app.post('/api/auth/signup', async (req, res) => {
   res.status(201).json({ user: { id: user.id, email: user.email, name: user.name }, business });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body ?? {};
   const user = email ? findUserByEmail(email) : undefined;
   if (!user || !user.password_hash) {
@@ -163,7 +201,7 @@ app.get('/api/auth/google/config', (_req, res) => {
   res.json({ configured: isGoogleSignInConfigured(), clientId: process.env.GOOGLE_CLIENT_ID ?? null });
 });
 
-app.post('/api/auth/google', async (req, res) => {
+app.post('/api/auth/google', authLimiter, async (req, res) => {
   const { credential } = req.body ?? {};
   if (!credential) {
     return res.status(400).json({ error: 'credential is required' });
