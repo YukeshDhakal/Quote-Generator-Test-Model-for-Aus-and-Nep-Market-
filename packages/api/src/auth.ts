@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
-import { db } from './db.js';
+import { pool, withTransaction } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const secretPath = join(__dirname, '..', 'data', '.session-secret');
@@ -83,109 +83,112 @@ interface UserRow {
   created_at: string;
 }
 
-export function findUserByEmail(email: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as UserRow | undefined;
+export async function findUserByEmail(email: string): Promise<UserRow | undefined> {
+  const { rows } = await pool.query<UserRow>('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+  return rows[0];
 }
 
-export function findUserByGoogleId(googleId: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as UserRow | undefined;
+export async function findUserByGoogleId(googleId: string): Promise<UserRow | undefined> {
+  const { rows } = await pool.query<UserRow>('SELECT * FROM users WHERE google_id = $1', [googleId]);
+  return rows[0];
 }
 
-export function findUserById(id: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+export async function findUserById(id: string): Promise<UserRow | undefined> {
+  const { rows } = await pool.query<UserRow>('SELECT * FROM users WHERE id = $1', [id]);
+  return rows[0];
 }
 
 /** The business used right after login/signup when none is specified — the first one this owner created. */
-export function findBusinessForOwner(userId: string): { id: string; name: string } | undefined {
-  return db
-    .prepare('SELECT id, name FROM businesses WHERE owner_user_id = ? ORDER BY created_at ASC LIMIT 1')
-    .get(userId) as { id: string; name: string } | undefined;
-}
-
-export function findBusinessById(businessId: string): { id: string; name: string } | undefined {
-  return db.prepare('SELECT id, name FROM businesses WHERE id = ?').get(businessId) as
-    | { id: string; name: string }
-    | undefined;
-}
-
-export function listBusinessesForOwner(userId: string): { id: string; name: string }[] {
-  return db
-    .prepare('SELECT id, name FROM businesses WHERE owner_user_id = ? ORDER BY created_at ASC')
-    .all(userId) as { id: string; name: string }[];
-}
-
-export function isBusinessOwnedByUser(businessId: string, userId: string): boolean {
-  return Boolean(
-    db.prepare('SELECT 1 FROM businesses WHERE id = ? AND owner_user_id = ?').get(businessId, userId),
+export async function findBusinessForOwner(userId: string): Promise<{ id: string; name: string } | undefined> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    'SELECT id, name FROM businesses WHERE owner_user_id = $1 ORDER BY created_at ASC LIMIT 1',
+    [userId],
   );
+  return rows[0];
+}
+
+export async function findBusinessById(businessId: string): Promise<{ id: string; name: string } | undefined> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    'SELECT id, name FROM businesses WHERE id = $1',
+    [businessId],
+  );
+  return rows[0];
+}
+
+export async function listBusinessesForOwner(userId: string): Promise<{ id: string; name: string }[]> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    'SELECT id, name FROM businesses WHERE owner_user_id = $1 ORDER BY created_at ASC',
+    [userId],
+  );
+  return rows;
+}
+
+export async function isBusinessOwnedByUser(businessId: string, userId: string): Promise<boolean> {
+  const { rows } = await pool.query('SELECT 1 FROM businesses WHERE id = $1 AND owner_user_id = $2', [
+    businessId,
+    userId,
+  ]);
+  return rows.length > 0;
 }
 
 /** Creates an additional business profile for an already-registered user — e.g. "I also operate in Nepal." Each business is locked to one jurisdiction (a business is registered in one place); operating in several markets means owning several business profiles, switchable from Business Settings. */
-export function createBusinessForUser(
+export async function createBusinessForUser(
   ownerUserId: string,
   name: string,
   jurisdiction: string,
-): { id: string; name: string } {
+): Promise<{ id: string; name: string }> {
   const businessId = randomUUID();
   const now = new Date().toISOString();
 
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.prepare('INSERT INTO businesses (id, owner_user_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+  await withTransaction(async (client) => {
+    await client.query('INSERT INTO businesses (id, owner_user_id, name, created_at) VALUES ($1, $2, $3, $4)', [
       businessId,
       ownerUserId,
       name,
       now,
+    ]);
+    await client.query(
+      'INSERT INTO business_settings (business_id, jurisdiction, updated_at) VALUES ($1, $2, $3)',
+      [businessId, jurisdiction, now],
     );
-    db.prepare(
-      'INSERT INTO business_settings (business_id, jurisdiction, updated_at) VALUES (?, ?, ?)',
-    ).run(businessId, jurisdiction, now);
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
 
   return { id: businessId, name };
 }
 
 /** Creates a user (email/password, Google, or both known upfront) plus their first Business, in one transaction. */
-export function createUserWithBusiness(input: {
+export async function createUserWithBusiness(input: {
   email: string;
   name?: string | null;
   passwordHash?: string | null;
   googleId?: string | null;
   businessName: string;
   jurisdiction?: string | null;
-}): { user: UserRow; business: { id: string; name: string } } {
+}): Promise<{ user: UserRow; business: { id: string; name: string } }> {
   const userId = randomUUID();
   const businessId = randomUUID();
   const now = new Date().toISOString();
 
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.prepare(
-      'INSERT INTO users (id, email, password_hash, google_id, name, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(userId, input.email.toLowerCase(), input.passwordHash ?? null, input.googleId ?? null, input.name ?? null, now);
+  await withTransaction(async (client) => {
+    await client.query(
+      'INSERT INTO users (id, email, password_hash, google_id, name, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [userId, input.email.toLowerCase(), input.passwordHash ?? null, input.googleId ?? null, input.name ?? null, now],
+    );
 
-    db.prepare('INSERT INTO businesses (id, owner_user_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+    await client.query('INSERT INTO businesses (id, owner_user_id, name, created_at) VALUES ($1, $2, $3, $4)', [
       businessId,
       userId,
       input.businessName,
       now,
-    );
+    ]);
 
     if (input.jurisdiction) {
-      db.prepare(
-        'INSERT INTO business_settings (business_id, jurisdiction, updated_at) VALUES (?, ?, ?)',
-      ).run(businessId, input.jurisdiction, now);
+      await client.query(
+        'INSERT INTO business_settings (business_id, jurisdiction, updated_at) VALUES ($1, $2, $3)',
+        [businessId, input.jurisdiction, now],
+      );
     }
-
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
 
   return {
     user: {
@@ -200,8 +203,8 @@ export function createUserWithBusiness(input: {
   };
 }
 
-export function linkGoogleIdToUser(userId: string, googleId: string): void {
-  db.prepare('UPDATE users SET google_id = ? WHERE id = ?').run(googleId, userId);
+export async function linkGoogleIdToUser(userId: string, googleId: string): Promise<void> {
+  await pool.query('UPDATE users SET google_id = $1 WHERE id = $2', [googleId, userId]);
 }
 
 let googleClient: OAuth2Client | null = null;
