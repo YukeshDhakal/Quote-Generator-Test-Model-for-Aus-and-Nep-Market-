@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from './db.js';
+import { pool } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const uploadsDir = join(__dirname, '..', 'data', 'uploads');
@@ -38,10 +38,11 @@ const EMPTY: BusinessSettings = {
   identifiers: {},
 };
 
-export function getBusinessSettings(businessId: string): BusinessSettings {
-  const row = db.prepare('SELECT * FROM business_settings WHERE business_id = ?').get(businessId) as
-    | BusinessRow
-    | undefined;
+export async function getBusinessSettings(businessId: string): Promise<BusinessSettings> {
+  const { rows } = await pool.query<BusinessRow>('SELECT * FROM business_settings WHERE business_id = $1', [
+    businessId,
+  ]);
+  const row = rows[0];
 
   if (!row) return EMPTY;
 
@@ -55,18 +56,21 @@ export function getBusinessSettings(businessId: string): BusinessSettings {
   };
 }
 
-export function saveBusinessSettings(businessId: string, patch: Partial<BusinessSettings>): BusinessSettings {
-  const current = getBusinessSettings(businessId);
+export async function saveBusinessSettings(
+  businessId: string,
+  patch: Partial<BusinessSettings>,
+): Promise<BusinessSettings> {
+  const current = await getBusinessSettings(businessId);
   const next: BusinessSettings = {
     ...current,
     ...patch,
     identifiers: { ...current.identifiers, ...(patch.identifiers ?? {}) },
   };
 
-  db.prepare(
+  await pool.query(
     `INSERT INTO business_settings (business_id, jurisdiction, legal_name, logo_path, color, terms_text, identifiers_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(business_id) DO UPDATE SET
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (business_id) DO UPDATE SET
        jurisdiction = excluded.jurisdiction,
        legal_name = excluded.legal_name,
        logo_path = excluded.logo_path,
@@ -74,15 +78,16 @@ export function saveBusinessSettings(businessId: string, patch: Partial<Business
        terms_text = excluded.terms_text,
        identifiers_json = excluded.identifiers_json,
        updated_at = excluded.updated_at`,
-  ).run(
-    businessId,
-    next.jurisdiction,
-    next.legalName,
-    next.logoPath,
-    next.color,
-    next.termsText,
-    JSON.stringify(next.identifiers),
-    new Date().toISOString(),
+    [
+      businessId,
+      next.jurisdiction,
+      next.legalName,
+      next.logoPath,
+      next.color,
+      next.termsText,
+      JSON.stringify(next.identifiers),
+      new Date().toISOString(),
+    ],
   );
 
   return next;
