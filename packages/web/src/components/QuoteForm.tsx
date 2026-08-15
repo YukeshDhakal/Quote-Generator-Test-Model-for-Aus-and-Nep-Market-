@@ -47,6 +47,7 @@ export interface QuoteFormInitial {
   customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
+  customerIdentifier?: string
   documentTypeKey?: string
   date?: string
   lineItems?: LineItem[]
@@ -60,6 +61,7 @@ export interface QuoteFormPayload {
   customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
+  customerIdentifier?: string
   documentTypeKey: string
   date: string
   lineItems: LineItem[]
@@ -73,18 +75,35 @@ interface QuoteFormProps {
   submittingLabel: string
   /** The business's own locked jurisdiction — never a per-quote choice, so always shown read-only. */
   jurisdiction: string
+  /** The business's own selected seller-identifier type (e.g. 'PAN' vs 'VAT_REG') — used only to
+      label the customer's identifier field with the same term, never to validate it. */
+  sellerIdentifierType?: string | null
   initial?: QuoteFormInitial
   onSubmit: (payload: QuoteFormPayload) => Promise<void>
 }
 
-export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction, initial, onSubmit }: QuoteFormProps) {
+export function QuoteForm({
+  heading,
+  submitLabel,
+  submittingLabel,
+  jurisdiction,
+  sellerIdentifierType,
+  initial,
+  onSubmit,
+}: QuoteFormProps) {
   const [customerName, setCustomerName] = useState(initial?.customerName ?? '')
   const [companyName, setCompanyName] = useState(initial?.companyName ?? '')
   const [customerEmail, setCustomerEmail] = useState(initial?.customerEmail ?? '')
   const [deliveryAddress, setDeliveryAddress] = useState(initial?.deliveryAddress ?? '')
   const [billingAddress, setBillingAddress] = useState(initial?.billingAddress ?? '')
+  const [customerIdentifier, setCustomerIdentifier] = useState(initial?.customerIdentifier ?? '')
 
   const profile = PROFILES[jurisdiction]
+  // Same label the business uses for its own identifier — reused here purely for terminology
+  // consistency; the customer's value is never validated against its format or required-ness (a
+  // customer outside the tenant's jurisdiction may use any format, or have none).
+  const customerIdentifierLabel =
+    profile.sellerIdentifiers.find((option) => option.key === sellerIdentifierType)?.label ?? 'Tax/business ID'
   const [documentTypeKey, setDocumentTypeKey] = useState(initial?.documentTypeKey ?? profile.documentTypes[0].key)
   const [date, setDate] = useState(initial?.date ?? '')
 
@@ -171,6 +190,7 @@ export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction,
         customerEmail: customerEmail || undefined,
         deliveryAddress: deliveryAddress || undefined,
         billingAddress: billingAddress || undefined,
+        customerIdentifier: customerIdentifier || undefined,
         documentTypeKey,
         date,
         lineItems: parsedLineItems,
@@ -229,6 +249,15 @@ export function QuoteForm({ heading, submitLabel, submittingLabel, jurisdiction,
           <div className="space-y-2">
             <Label htmlFor="billingAddress">Billing address</Label>
             <Input id="billingAddress" value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="customerIdentifier">Customer {customerIdentifierLabel} (optional)</Label>
+            <Input
+              id="customerIdentifier"
+              value={customerIdentifier}
+              onChange={(e) => setCustomerIdentifier(e.target.value)}
+              placeholder="Any format — not validated"
+            />
           </div>
         </CardContent>
       </Card>

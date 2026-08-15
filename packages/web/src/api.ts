@@ -24,6 +24,7 @@ export interface RequestRecord {
   customerEmail: string | null
   deliveryAddress: string | null
   billingAddress: string | null
+  customerIdentifier: string | null
   createdAt: string
   quoteCount: number
 }
@@ -58,6 +59,7 @@ export interface QuoteDetail {
     customerEmail: string | null
     deliveryAddress: string | null
     billingAddress: string | null
+    customerIdentifier: string | null
   } | null
 }
 
@@ -67,6 +69,7 @@ export function createRequest(input: {
   customerEmail?: string
   deliveryAddress?: string
   billingAddress?: string
+  customerIdentifier?: string
 }) {
   return request<{ id: string }>('/requests', { method: 'POST', body: JSON.stringify(input) })
 }
@@ -79,6 +82,7 @@ export function updateRequest(
     customerEmail?: string
     deliveryAddress?: string
     billingAddress?: string
+    customerIdentifier?: string
   },
 ) {
   return request<{ id: string }>(`/requests/${id}`, { method: 'PUT', body: JSON.stringify(input) })
@@ -136,6 +140,7 @@ export interface BusinessSettings {
   color: string | null
   termsText: string | null
   identifiers: Record<string, string>
+  identifierType: string | null
 }
 
 export function getBusiness() {
@@ -148,6 +153,7 @@ export function saveBusiness(input: {
   color?: string | null
   termsText?: string | null
   identifiers?: Record<string, string>
+  identifierType?: string | null
 }) {
   return request<BusinessSettings>('/business', { method: 'PUT', body: JSON.stringify(input) })
 }

@@ -7,9 +7,13 @@ import { createQuote, createRequest, getBusiness } from '../api'
 export function NewQuote() {
   const navigate = useNavigate()
   const [jurisdiction, setJurisdiction] = useState<string | null | undefined>(undefined)
+  const [sellerIdentifierType, setSellerIdentifierType] = useState<string | null>(null)
 
   useEffect(() => {
-    getBusiness().then((b) => setJurisdiction(b.jurisdiction))
+    getBusiness().then((b) => {
+      setJurisdiction(b.jurisdiction)
+      setSellerIdentifierType(b.identifierType)
+    })
   }, [])
 
   async function handleSubmit(payload: QuoteFormPayload) {
@@ -19,6 +23,7 @@ export function NewQuote() {
       customerEmail: payload.customerEmail,
       deliveryAddress: payload.deliveryAddress,
       billingAddress: payload.billingAddress,
+      customerIdentifier: payload.customerIdentifier,
     })
 
     const quote = await createQuote(req.id, {
@@ -55,6 +60,7 @@ export function NewQuote() {
       submitLabel="Create quote"
       submittingLabel="Creating…"
       jurisdiction={jurisdiction}
+      sellerIdentifierType={sellerIdentifierType}
       onSubmit={handleSubmit}
     />
   )

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { AU_PROFILE, NP_PROFILE } from '@quote-engine/engine'
+import { AU_PROFILE, NP_PROFILE, validateSellerIdentifierValue, type JurisdictionProfile } from '@quote-engine/engine'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { SellerIdentifierField } from '@/components/SellerIdentifierField'
 import {
   API_ORIGIN,
   createBusinessProfile,
@@ -19,11 +20,7 @@ import {
 } from '../api'
 
 const JURISDICTIONS: Record<string, string> = { AU: 'Australia (GST)', NP: 'Nepal (VAT)' }
-
-// Every seller identifier across the jurisdictions this business might quote in (v1: AU, NP).
-const ALL_IDENTIFIERS = [...AU_PROFILE.sellerIdentifiers, ...NP_PROFILE.sellerIdentifiers].filter(
-  (id, index, all) => all.findIndex((other) => other.key === id.key) === index,
-)
+const PROFILES: Record<string, JurisdictionProfile> = { AU: AU_PROFILE, NP: NP_PROFILE }
 
 function BusinessProfiles() {
   const [profiles, setProfiles] = useState<BusinessProfile[] | null>(null)
@@ -159,6 +156,8 @@ export function BusinessSettings() {
   const [color, setColor] = useState('#0ea5e9')
   const [termsText, setTermsText] = useState('')
   const [identifiers, setIdentifiers] = useState<Record<string, string>>({})
+  const [identifierType, setIdentifierType] = useState<string | null>(null)
+  const [identifierError, setIdentifierError] = useState<string | null>(null)
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(true)
@@ -174,6 +173,10 @@ export function BusinessSettings() {
         setColor(b.color ?? '#0ea5e9')
         setTermsText(b.termsText ?? '')
         setIdentifiers(b.identifiers ?? {})
+        // Default to the jurisdiction's first identifier option only as an initial UI choice for
+        // a business that's never picked one — not a hardcoded render assumption. Once saved,
+        // b.identifierType always wins.
+        setIdentifierType(b.identifierType ?? (b.jurisdiction ? PROFILES[b.jurisdiction]?.sellerIdentifiers[0]?.key ?? null : null))
         setLogoUrl(b.logoPath ? `${API_ORIGIN}/uploads/${b.logoPath.split(/[\\/]/).pop()}` : null)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load business settings.'))
@@ -182,10 +185,22 @@ export function BusinessSettings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
     setError(null)
+    setIdentifierError(null)
+
+    const profile = jurisdiction ? PROFILES[jurisdiction] : undefined
+    const activeOption = profile?.sellerIdentifiers.find((o) => o.key === identifierType) ?? profile?.sellerIdentifiers[0]
+    if (profile && activeOption) {
+      const message = validateSellerIdentifierValue(activeOption, identifiers[activeOption.key] ?? '')
+      if (message) {
+        setIdentifierError(message)
+        return
+      }
+    }
+
+    setSaving(true)
     try {
-      const settings = await saveBusiness({ legalName, color, termsText, identifiers })
+      const settings = await saveBusiness({ legalName, color, termsText, identifiers, identifierType })
       setJurisdiction(settings.jurisdiction)
       setSavedAt(Date.now())
     } catch (err) {
@@ -310,19 +325,28 @@ export function BusinessSettings() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Seller identifiers</CardTitle>
+            <CardTitle className="text-base">Seller identifier</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            {ALL_IDENTIFIERS.map((id) => (
-              <div key={id.key} className="space-y-2">
-                <Label htmlFor={`id-${id.key}`}>{id.label}</Label>
-                <Input
-                  id={`id-${id.key}`}
-                  value={identifiers[id.key] ?? ''}
-                  onChange={(e) => setIdentifiers((prev) => ({ ...prev, [id.key]: e.target.value }))}
-                />
-              </div>
-            ))}
+          <CardContent>
+            {jurisdiction ? (
+              <SellerIdentifierField
+                profile={PROFILES[jurisdiction]}
+                type={identifierType}
+                onTypeChange={(key) => {
+                  setIdentifierType(key)
+                  setIdentifierError(null)
+                }}
+                value={identifiers[identifierType ?? PROFILES[jurisdiction].sellerIdentifiers[0]?.key ?? ''] ?? ''}
+                onValueChange={(v) => {
+                  const key = identifierType ?? PROFILES[jurisdiction].sellerIdentifiers[0]?.key
+                  if (key) setIdentifiers((prev) => ({ ...prev, [key]: v }))
+                  setIdentifierError(null)
+                }}
+                error={identifierError}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Set a jurisdiction above first.</p>
+            )}
           </CardContent>
         </Card>
 

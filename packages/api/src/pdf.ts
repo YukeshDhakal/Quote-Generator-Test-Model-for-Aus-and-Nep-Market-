@@ -62,7 +62,13 @@ export function buildQuoteHtml(
   quote: Quote,
   result: QuoteResult,
   business: BusinessSettings,
-  customer: { customerName: string; companyName: string | null; deliveryAddress: string | null; billingAddress: string | null } | null,
+  customer: {
+    customerName: string;
+    companyName: string | null;
+    deliveryAddress: string | null;
+    billingAddress: string | null;
+    customerIdentifier?: string | null;
+  } | null,
 ): string {
   const profile = quote.jurisdictionProfile;
   const accent = business.color || '#aa3bff';
@@ -78,12 +84,25 @@ export function buildQuoteHtml(
     )
     .join('');
 
-  const sellerIdentifiers = profile.sellerIdentifiers
-    .map(
-      (id) =>
-        `<div class="identifier"><span>${escapeHtml(id.label)}: ${escapeHtml(business.identifiers[id.key] || '—')}</span></div>`,
-    )
-    .join('');
+  // Exactly one seller identifier is ever rendered - whichever the business selected in Business
+  // Settings (identifierType). Falls back to the jurisdiction's first option only for
+  // pre-migration businesses that saved before identifierType existed, never as a per-call
+  // default choice. Position (header vs footer) comes from that option's own profile data, not
+  // from anything hardcoded here - see SellerIdentifier.position.
+  const sellerIdentifierOption =
+    profile.sellerIdentifiers.find((id) => id.key === business.identifierType) ?? profile.sellerIdentifiers[0];
+  const sellerIdentifierHtml = sellerIdentifierOption
+    ? `<div class="identifier"><span>${escapeHtml(sellerIdentifierOption.label)}: ${escapeHtml(business.identifiers[sellerIdentifierOption.key] || '—')}</span></div>`
+    : '';
+  const sellerIdentifierInHeader = sellerIdentifierOption?.position !== 'footer' ? sellerIdentifierHtml : '';
+  const sellerIdentifierInFooter = sellerIdentifierOption?.position === 'footer' ? sellerIdentifierHtml : '';
+
+  // Customer identifier reuses the same field metadata (label) but is never validated or
+  // required - a customer outside the tenant's jurisdiction may supply any format or none.
+  const customerIdentifierHtml =
+    customer?.customerIdentifier && sellerIdentifierOption
+      ? `<div>${escapeHtml(sellerIdentifierOption.label)}: ${escapeHtml(customer.customerIdentifier)}</div>`
+      : '';
 
   const totalsRows: string[] = [
     `<tr><td>${escapeHtml(result.labels.subtotalLabel)}</td><td>${formatAmount(result.totals.lineSubtotal, profile)}</td></tr>`,
@@ -111,7 +130,7 @@ export function buildQuoteHtml(
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 32px; font-size: 13px; }
+  body { font-family: 'Segoe UI', 'Nirmala UI', 'Mangal', Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 32px; font-size: 13px; }
   .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid ${accent}; padding-bottom: 16px; margin-bottom: 20px; }
   .header .logo img { max-height: 64px; max-width: 220px; }
   .header .seller { text-align: right; }
@@ -131,6 +150,7 @@ export function buildQuoteHtml(
   table.totals tr.grand td { font-weight: 700; border-top: 1px solid #333; padding-top: 8px; }
   .words { font-style: italic; font-size: 11px; color: #555; margin-top: 10px; }
   .terms { margin-top: 28px; font-size: 11px; color: #555; white-space: pre-wrap; border-top: 1px solid #e0e0e0; padding-top: 12px; }
+  .footer-identifier { margin-top: 16px; padding-top: 12px; border-top: 1px solid #e0e0e0; text-align: center; }
 </style>
 </head>
 <body>
@@ -138,7 +158,7 @@ export function buildQuoteHtml(
     <div class="logo">${logo ? `<img src="${logo}" />` : ''}</div>
     <div class="seller">
       <div class="legal-name">${escapeHtml(business.legalName || '')}</div>
-      ${sellerIdentifiers}
+      ${sellerIdentifierInHeader}
     </div>
   </div>
 
@@ -150,6 +170,7 @@ export function buildQuoteHtml(
       <h3>Customer</h3>
       <div>${escapeHtml(customer?.customerName ?? '')}</div>
       ${customer?.companyName ? `<div>${escapeHtml(customer.companyName)}</div>` : ''}
+      ${customerIdentifierHtml}
     </div>
     ${
       customer?.billingAddress
@@ -173,6 +194,7 @@ export function buildQuoteHtml(
   ${result.amountInWords ? `<div class="words">${escapeHtml(result.amountInWords)}</div>` : ''}
 
   ${business.termsText ? `<div class="terms">${escapeHtml(business.termsText)}</div>` : ''}
+  ${sellerIdentifierInFooter ? `<div class="footer-identifier">${sellerIdentifierInFooter}</div>` : ''}
 </body>
 </html>`;
 }

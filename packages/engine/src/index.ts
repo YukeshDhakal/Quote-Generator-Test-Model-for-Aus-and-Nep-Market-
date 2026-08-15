@@ -7,3 +7,4 @@ export { financialYearTag, financialYearStart } from './financial-year.js';
 export { parseProfileDate, compareProfileDates, isWithinProfileDateRange, type DateParts } from './date-compare.js';
 export { AU_PROFILE } from './jurisdictions/au.js';
 export { NP_PROFILE } from './jurisdictions/np.js';
+export { validateSellerIdentifierValue } from './seller-identifier.js';

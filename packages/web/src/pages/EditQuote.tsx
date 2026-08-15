@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { QuoteForm, type QuoteFormPayload } from '../components/QuoteForm'
-import { getQuote, updateQuote, updateRequest, type QuoteDetail } from '../api'
+import { getBusiness, getQuote, updateQuote, updateRequest, type QuoteDetail } from '../api'
 
 export function EditQuote() {
   const { id: quoteId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [data, setData] = useState<QuoteDetail | null>(null)
+  const [sellerIdentifierType, setSellerIdentifierType] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -18,6 +19,13 @@ export function EditQuote() {
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load quote.')
+      })
+    getBusiness()
+      .then((b) => {
+        if (!cancelled) setSellerIdentifierType(b.identifierType)
+      })
+      .catch(() => {
+        // Non-fatal — the customer identifier field just falls back to a generic label.
       })
     return () => {
       cancelled = true
@@ -35,6 +43,7 @@ export function EditQuote() {
       customerEmail: payload.customerEmail,
       deliveryAddress: payload.deliveryAddress,
       billingAddress: payload.billingAddress,
+      customerIdentifier: payload.customerIdentifier,
     })
 
     await updateQuote(data.quoteRow.id, {
@@ -54,12 +63,14 @@ export function EditQuote() {
       submitLabel="Save changes"
       submittingLabel="Saving…"
       jurisdiction={data.quote.jurisdictionProfile.jurisdiction}
+      sellerIdentifierType={sellerIdentifierType}
       initial={{
         customerName: data.customer?.customerName,
         companyName: data.customer?.companyName ?? undefined,
         customerEmail: data.customer?.customerEmail ?? undefined,
         deliveryAddress: data.customer?.deliveryAddress ?? undefined,
         billingAddress: data.customer?.billingAddress ?? undefined,
+        customerIdentifier: data.customer?.customerIdentifier ?? undefined,
         documentTypeKey: data.quote.documentTypeKey,
         date: data.quote.date,
         lineItems: data.quote.lineItems,

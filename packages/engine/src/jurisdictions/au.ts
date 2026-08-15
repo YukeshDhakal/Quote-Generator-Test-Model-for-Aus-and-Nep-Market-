@@ -26,7 +26,7 @@ export const AU_PROFILE: JurisdictionProfile = {
   financialYear: { startMonth: 7, startDay: 1 },
   numerals: { grouping: 'western', wordsRequired: false, wordsLocale: null },
   sellerIdentifiers: [
-    { key: 'ABN', label: 'ABN', required: true, position: 'header_right' },
+    { key: 'ABN', label: 'ABN', required: true, format: '^\\d{11}$', formatDescription: '11 digits', position: 'footer' },
   ],
   documentTypes: [{ key: 'quote', title: 'Quote', showTax: true }],
   lineItemColumns: ['product_code', 'description', 'qty', 'unit_price', 'total'],

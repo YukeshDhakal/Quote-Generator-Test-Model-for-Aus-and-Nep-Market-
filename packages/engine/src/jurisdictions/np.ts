@@ -25,8 +25,19 @@ export const NP_PROFILE: JurisdictionProfile = {
   // Nepali fiscal year: Shrawan 1 - Ashad end (month 4 of the starting BS year through month 3 of the next).
   financialYear: { startMonth: 4, startDay: 1 },
   numerals: { grouping: 'lakh_crore', wordsRequired: true, wordsLocale: 'ne_IN' },
+  // Two registration types a Nepali business can hold: PAN-only, or VAT-registered (which uses
+  // the same 9-digit number, just under VAT status). The business picks which one applies to it
+  // once in Business Settings - the dropdown only appears because this array has >1 entry.
   sellerIdentifiers: [
-    { key: 'PAN', label: 'PAN', required: true, position: 'header_right' },
+    { key: 'PAN', label: 'PAN', required: true, format: '^\\d{9}$', formatDescription: '9 digits', position: 'header_right' },
+    {
+      key: 'VAT_REG',
+      label: 'VAT Registration No.',
+      required: true,
+      format: '^\\d{9}$',
+      formatDescription: '9 digits',
+      position: 'header_right',
+    },
   ],
   documentTypes: [
     { key: 'quotation', title: 'Quotation', showTax: true },

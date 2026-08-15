@@ -16,6 +16,8 @@ export interface BusinessSettings {
   termsText: string | null;
   /** Seller identifier values keyed by JurisdictionProfile.sellerIdentifiers[].key, e.g. { ABN: "51 824 753 556", PAN: "123456789" }. */
   identifiers: Record<string, string>;
+  /** Which key in `identifiers` is the one active/displayed identifier for this business (e.g. 'PAN' vs 'VAT_REG' for a Nepali business). Null until chosen. */
+  identifierType: string | null;
 }
 
 interface BusinessRow {
@@ -26,6 +28,7 @@ interface BusinessRow {
   color: string | null;
   terms_text: string | null;
   identifiers_json: string | null;
+  identifier_type: string | null;
   updated_at: string;
 }
 
@@ -36,6 +39,7 @@ const EMPTY: BusinessSettings = {
   color: null,
   termsText: null,
   identifiers: {},
+  identifierType: null,
 };
 
 export async function getBusinessSettings(businessId: string): Promise<BusinessSettings> {
@@ -53,6 +57,7 @@ export async function getBusinessSettings(businessId: string): Promise<BusinessS
     color: row.color,
     termsText: row.terms_text,
     identifiers: row.identifiers_json ? JSON.parse(row.identifiers_json) : {},
+    identifierType: row.identifier_type,
   };
 }
 
@@ -68,8 +73,8 @@ export async function saveBusinessSettings(
   };
 
   await pool.query(
-    `INSERT INTO business_settings (business_id, jurisdiction, legal_name, logo_path, color, terms_text, identifiers_json, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO business_settings (business_id, jurisdiction, legal_name, logo_path, color, terms_text, identifiers_json, identifier_type, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (business_id) DO UPDATE SET
        jurisdiction = excluded.jurisdiction,
        legal_name = excluded.legal_name,
@@ -77,6 +82,7 @@ export async function saveBusinessSettings(
        color = excluded.color,
        terms_text = excluded.terms_text,
        identifiers_json = excluded.identifiers_json,
+       identifier_type = excluded.identifier_type,
        updated_at = excluded.updated_at`,
     [
       businessId,
@@ -86,6 +92,7 @@ export async function saveBusinessSettings(
       next.color,
       next.termsText,
       JSON.stringify(next.identifiers),
+      next.identifierType,
       new Date().toISOString(),
     ],
   );

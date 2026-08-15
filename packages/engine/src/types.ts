@@ -19,6 +19,10 @@ export interface SellerIdentifier {
   key: string;
   label: string;
   required: boolean;
+  /** Regex source (no slashes) a value must match, e.g. '^\\d{9}$'. Tested against the trimmed value. */
+  format: string;
+  /** Human-readable description of `format`, used to generate validation messages, e.g. "9 digits". */
+  formatDescription: string;
   position: string;
 }
 
