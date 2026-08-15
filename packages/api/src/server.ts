@@ -134,7 +134,23 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: WEB_ORIGINS, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
-app.use('/uploads', express.static(uploadsDir));
+
+// Logos used to be served by express.static with no auth at all - any of the app's own filenames
+// (logo-<businessId>.<ext>) would fetch cleanly from ANY browser, logged in or not, tenant or
+// not. Filenames aren't brute-forceable (businessId is a random UUID) but that's obscurity, not
+// access control. This route requires a session AND checks the filename's embedded businessId
+// against the caller's own tenant before ever touching the filesystem - the regex also doubles
+// as a path-traversal guard, since anything that isn't exactly `logo-<no dots/slashes>.<ext>`
+// (in particular anything containing `..` or `/`) is rejected before join(uploadsDir, ...) runs.
+app.get('/uploads/:filename', requireAuth, (req, res) => {
+  const match = /^logo-([^./\\]+)(\.[a-zA-Z0-9]+)$/.exec(req.params.filename);
+  if (!match || match[1] !== req.businessId) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.sendFile(join(uploadsDir, req.params.filename), (err) => {
+    if (err) res.status(404).json({ error: 'not found' });
+  });
+});
 
 // Applies to every /api/* route as a baseline defense against scraping/abuse - generous enough
 // (300 req/15min per IP) that no legitimate usage pattern in this app should ever hit it.
@@ -650,11 +666,15 @@ app.put('/api/quotes/:id', async (req, res) => {
   }
 
   await withTransaction(async (client) => {
+    // business_id is redundant here - the SELECT above already confirmed this quote belongs to
+    // req.businessId - but the mutating statement filters on it directly too rather than relying
+    // solely on the earlier check-then-act, so a future refactor can't silently reorder its way
+    // into a cross-tenant write.
     await client.query(
       `UPDATE quotes SET
         document_type_key = $1, split_value = $2, quote_date = $3, order_discount_type = $4, order_discount_value = $5,
         delivery_mode = $6, delivery_amount = $7, pdf_path = NULL
-       WHERE id = $8`,
+       WHERE id = $8 AND business_id = $9`,
       [
         documentTypeKey,
         splitValue ?? null,
@@ -664,10 +684,17 @@ app.put('/api/quotes/:id', async (req, res) => {
         delivery?.mode ?? null,
         delivery?.amount ?? null,
         req.params.id,
+        req.businessId!,
       ],
     );
 
-    await client.query('DELETE FROM line_items WHERE quote_id = $1', [req.params.id]);
+    // line_items has no business_id column of its own (child of quotes via quote_id) - scope the
+    // delete through quotes.business_id directly rather than trusting quote_id alone.
+    await client.query(
+      `DELETE FROM line_items USING quotes
+       WHERE line_items.quote_id = quotes.id AND line_items.quote_id = $1 AND quotes.business_id = $2`,
+      [req.params.id, req.businessId!],
+    );
 
     for (const [index, item] of (lineItems as LineItem[]).entries()) {
       await client.query(
