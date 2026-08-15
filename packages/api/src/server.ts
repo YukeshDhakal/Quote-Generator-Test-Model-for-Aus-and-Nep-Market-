@@ -15,6 +15,7 @@ import {
   compareProfileDates,
   financialYearTag,
   isWithinProfileDateRange,
+  validateSellerIdentifierValue,
   type Discount,
   type JurisdictionProfile,
   type LineItem,
@@ -382,6 +383,10 @@ interface RequestRow {
   customer_email: string | null;
   delivery_address: string | null;
   billing_address: string | null;
+  /** The customer's own tax/business identifier. Optional and never format-validated — a foreign
+      customer's number may be in any format or absent entirely; see validateSellerIdentifierValue
+      usage in the /business route, which is deliberately NOT applied here. */
+  customer_identifier: string | null;
   created_at: string;
 }
 
@@ -468,6 +473,7 @@ async function loadQuote(businessId: string, quoteId: string) {
         customerEmail: requestRow.customer_email,
         deliveryAddress: requestRow.delivery_address,
         billingAddress: requestRow.billing_address,
+        customerIdentifier: requestRow.customer_identifier,
       }
     : null;
 
@@ -486,17 +492,19 @@ app.post('/api/requests', async (req, res) => {
     'customerEmail',
     'deliveryAddress',
     'billingAddress',
+    'customerIdentifier',
   ]);
   if (unknownFields) return res.status(400).json({ error: unknownFields });
-  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
+  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress, customerIdentifier } =
+    req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
   const id = randomUUID();
   await pool.query(
-    `INSERT INTO requests (id, business_id, customer_name, company_name, customer_email, delivery_address, billing_address, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO requests (id, business_id, customer_name, company_name, customer_email, delivery_address, billing_address, customer_identifier, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       id,
       req.businessId!,
@@ -505,11 +513,12 @@ app.post('/api/requests', async (req, res) => {
       customerEmail ?? null,
       deliveryAddress ?? null,
       billingAddress ?? null,
+      customerIdentifier ?? null,
       new Date().toISOString(),
     ],
   );
 
-  res.status(201).json({ id, customerName, companyName, customerEmail, deliveryAddress, billingAddress });
+  res.status(201).json({ id, customerName, companyName, customerEmail, deliveryAddress, billingAddress, customerIdentifier });
 });
 
 app.put('/api/requests/:id', async (req, res) => {
@@ -525,22 +534,25 @@ app.put('/api/requests/:id', async (req, res) => {
     'customerEmail',
     'deliveryAddress',
     'billingAddress',
+    'customerIdentifier',
   ]);
   if (unknownFields) return res.status(400).json({ error: unknownFields });
-  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
+  const { customerName, companyName, customerEmail, deliveryAddress, billingAddress, customerIdentifier } =
+    req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
   }
 
   await pool.query(
-    `UPDATE requests SET customer_name = $1, company_name = $2, customer_email = $3, delivery_address = $4, billing_address = $5
-     WHERE id = $6 AND business_id = $7`,
+    `UPDATE requests SET customer_name = $1, company_name = $2, customer_email = $3, delivery_address = $4, billing_address = $5, customer_identifier = $6
+     WHERE id = $7 AND business_id = $8`,
     [
       customerName,
       companyName ?? null,
       customerEmail ?? null,
       deliveryAddress ?? null,
       billingAddress ?? null,
+      customerIdentifier ?? null,
       req.params.id,
       req.businessId!,
     ],
@@ -553,6 +565,7 @@ app.put('/api/requests/:id', async (req, res) => {
     customerEmail: customerEmail ?? null,
     deliveryAddress: deliveryAddress ?? null,
     billingAddress: billingAddress ?? null,
+    customerIdentifier: customerIdentifier ?? null,
   });
 });
 
@@ -573,6 +586,7 @@ app.get('/api/requests', async (req, res) => {
         customerEmail: row.customer_email,
         deliveryAddress: row.delivery_address,
         billingAddress: row.billing_address,
+        customerIdentifier: row.customer_identifier,
         createdAt: row.created_at,
         quoteCount: Number(countRows[0].count),
       };
@@ -890,23 +904,48 @@ app.get('/api/business', async (req, res) => {
 });
 
 app.put('/api/business', async (req, res) => {
-  const unknownFields = rejectUnknownFields(req.body, ['jurisdiction', 'legalName', 'color', 'termsText', 'identifiers']);
+  const unknownFields = rejectUnknownFields(req.body, [
+    'jurisdiction',
+    'legalName',
+    'color',
+    'termsText',
+    'identifiers',
+    'identifierType',
+  ]);
   if (unknownFields) return res.status(400).json({ error: unknownFields });
-  const { jurisdiction, legalName, color, termsText, identifiers } = req.body ?? {};
+  const { jurisdiction, legalName, color, termsText, identifiers, identifierType } = req.body ?? {};
 
-  // Only touch jurisdiction if the caller actually sent it — omitting the key must never
-  // silently wipe an already-set jurisdiction (see saveBusinessSettings' merge semantics).
-  const patch: Parameters<typeof saveBusinessSettings>[1] = {
-    legalName: legalName ?? null,
-    color: color ?? null,
-    termsText: termsText ?? null,
-    identifiers: identifiers ?? {},
-  };
+  // Only touch a field if the caller actually sent it — omitting a key must never silently wipe
+  // an already-saved value (see saveBusinessSettings' merge semantics). This used to apply only
+  // to jurisdiction, which meant a jurisdiction-only save (e.g. "Set jurisdiction") reset
+  // color/legalName/termsText/identifiers to null/empty every time.
+  const patch: Parameters<typeof saveBusinessSettings>[1] = {};
   if (jurisdiction !== undefined) {
     if (!PROFILES[jurisdiction]) {
       return res.status(400).json({ error: `unknown jurisdiction "${jurisdiction}"` });
     }
     patch.jurisdiction = jurisdiction;
+  }
+  if (legalName !== undefined) patch.legalName = legalName;
+  if (color !== undefined) patch.color = color;
+  if (termsText !== undefined) patch.termsText = termsText;
+  if (identifiers !== undefined) patch.identifiers = identifiers;
+  if (identifierType !== undefined) patch.identifierType = identifierType;
+
+  // The seller identifier is compliance-relevant (same failure class as invoice numbering), so
+  // it's validated server-side too, not just in the form — using the SAME generator the client
+  // uses (validateSellerIdentifierValue), never a hand-written message here.
+  if (identifierType) {
+    const current = await getBusinessSettings(req.businessId!);
+    const effectiveJurisdiction = patch.jurisdiction ?? current.jurisdiction;
+    const profile = effectiveJurisdiction ? PROFILES[effectiveJurisdiction] : undefined;
+    const option = profile?.sellerIdentifiers.find((id) => id.key === identifierType);
+    if (!option) {
+      return res.status(400).json({ error: `"${identifierType}" is not a valid identifier for this jurisdiction` });
+    }
+    const value = (patch.identifiers ?? current.identifiers)[identifierType] ?? '';
+    const message = validateSellerIdentifierValue(option, value);
+    if (message) return res.status(400).json({ error: message });
   }
 
   const settings = await saveBusinessSettings(req.businessId!, patch);
