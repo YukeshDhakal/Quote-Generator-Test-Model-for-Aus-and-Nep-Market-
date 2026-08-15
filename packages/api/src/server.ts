@@ -1,7 +1,7 @@
 import 'express-async-errors';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -55,11 +55,13 @@ import { findBlocklistedTerms } from './blocklist.js';
 import { getBusinessSettings, saveBusinessSettings, uploadsDir } from './business.js';
 import { assertTokenEncryptionKeyValid } from './crypto.js';
 import { pool, withTransaction } from './db.js';
+import { extensionForImageType, sniffImageType } from './fileType.js';
 import { quotePdfFilename } from './filename.js';
 import { composeQuoteEmail, DEFAULT_BODY, sendComposedEmail } from './mail.js';
 import { nextQuoteNumber, peekNextQuoteNumber } from './numbering.js';
 import { todayInProfileCalendar } from './today.js';
 import { buildQuoteHtml, renderQuotePdf } from './pdf.js';
+import { rejectUnknownFields } from './validation.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -150,7 +152,7 @@ app.use(cookieParser());
 // as a path-traversal guard, since anything that isn't exactly `logo-<no dots/slashes>.<ext>`
 // (in particular anything containing `..` or `/`) is rejected before join(uploadsDir, ...) runs.
 app.get('/uploads/:filename', requireAuth, (req, res) => {
-  const match = /^logo-([^./\\]+)(\.[a-zA-Z0-9]+)$/.exec(req.params.filename);
+  const match = /^logo-([^./\\]+)(\.(?:png|jpg|webp|svg))$/.exec(req.params.filename);
   if (!match || match[1] !== req.businessId) {
     return res.status(404).json({ error: 'not found' });
   }
@@ -191,15 +193,14 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again later.' },
 });
 
+// memoryStorage, not diskStorage: the client's Content-Type header and the uploaded filename's
+// extension are both attacker-controlled and don't have to match the actual bytes, so nothing
+// client-supplied is trusted for either the accept/reject decision or the on-disk filename -
+// see the sniffImageType() content check in the /api/business/logo route below, which is the
+// real gate. Buffering the whole file is fine at a 2MB cap.
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: uploadsDir,
-    filename: (req, file, cb) => cb(null, `logo-${(req as Request).businessId}${extname(file.originalname) || '.png'}`),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    cb(null, /^image\/(png|jpeg|svg\+xml|webp)$/.test(file.mimetype));
-  },
 });
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -222,6 +223,8 @@ function setSessionCookie(res: Response, userId: string, businessId: string) {
 // ---------------------------------------------------------------------------
 
 app.post('/api/auth/signup', authLimiter, async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['email', 'password', 'name', 'businessName', 'jurisdiction']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { email, password, name, businessName, jurisdiction } = req.body ?? {};
   if (!email || !password) {
     return res.status(400).json({ error: 'email and password are required' });
@@ -250,6 +253,8 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['email', 'password']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { email, password } = req.body ?? {};
   const user = email ? await findUserByEmail(email) : undefined;
   if (!user || !user.password_hash) {
@@ -274,6 +279,8 @@ app.get('/api/auth/google/config', (_req, res) => {
 });
 
 app.post('/api/auth/google', authLimiter, async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['credential']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { credential } = req.body ?? {};
   if (!credential) {
     return res.status(400).json({ error: 'credential is required' });
@@ -338,6 +345,8 @@ app.get('/api/auth/businesses', requireAuth, async (req, res) => {
 });
 
 app.post('/api/auth/businesses', requireAuth, async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['name', 'jurisdiction']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { name, jurisdiction } = req.body ?? {};
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!jurisdiction || !PROFILES[jurisdiction]) {
@@ -350,6 +359,8 @@ app.post('/api/auth/businesses', requireAuth, async (req, res) => {
 });
 
 app.post('/api/auth/switch-business', requireAuth, async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['businessId']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { businessId } = req.body ?? {};
   if (!businessId || !(await isBusinessOwnedByUser(businessId, req.userId!))) {
     return res.status(403).json({ error: 'not your business' });
@@ -469,6 +480,14 @@ app.use('/api/business', requireAuth);
 app.use('/api/dashboard', requireAuth);
 
 app.post('/api/requests', async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, [
+    'customerName',
+    'companyName',
+    'customerEmail',
+    'deliveryAddress',
+    'billingAddress',
+  ]);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
@@ -500,6 +519,14 @@ app.put('/api/requests/:id', async (req, res) => {
   ]);
   if (!rows[0]) return res.status(404).json({ error: 'request not found' });
 
+  const unknownFields = rejectUnknownFields(req.body, [
+    'customerName',
+    'companyName',
+    'customerEmail',
+    'deliveryAddress',
+    'billingAddress',
+  ]);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { customerName, companyName, customerEmail, deliveryAddress, billingAddress } = req.body ?? {};
   if (!customerName) {
     return res.status(400).json({ error: 'customerName is required' });
@@ -565,6 +592,15 @@ app.post('/api/requests/:requestId/quotes', async (req, res) => {
     return res.status(404).json({ error: 'request not found' });
   }
 
+  const unknownFields = rejectUnknownFields(req.body, [
+    'documentTypeKey',
+    'date',
+    'splitValue',
+    'lineItems',
+    'orderDiscount',
+    'delivery',
+  ]);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { documentTypeKey, date, splitValue, lineItems, orderDiscount, delivery } = req.body ?? {};
 
   // Jurisdiction is never taken from the client — it's the business's own locked jurisdiction,
@@ -656,6 +692,15 @@ app.put('/api/quotes/:id', async (req, res) => {
   // Jurisdiction is not editable here — it's baked into the quote number's prefix, so changing
   // it would make the already-issued number wrong. Delete and re-create instead if that's needed.
   const profile: JurisdictionProfile = JSON.parse(quoteRow.jurisdiction_profile_json);
+  const unknownFields = rejectUnknownFields(req.body, [
+    'documentTypeKey',
+    'date',
+    'splitValue',
+    'lineItems',
+    'orderDiscount',
+    'delivery',
+  ]);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { documentTypeKey, date, splitValue, lineItems, orderDiscount, delivery } = req.body ?? {};
 
   if (!profile.documentTypes.some((dt) => dt.key === documentTypeKey)) {
@@ -845,6 +890,8 @@ app.get('/api/business', async (req, res) => {
 });
 
 app.put('/api/business', async (req, res) => {
+  const unknownFields = rejectUnknownFields(req.body, ['jurisdiction', 'legalName', 'color', 'termsText', 'identifiers']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { jurisdiction, legalName, color, termsText, identifiers } = req.body ?? {};
 
   // Only touch jurisdiction if the caller actually sent it — omitting the key must never
@@ -870,8 +917,23 @@ app.post('/api/business/logo', requireAuth, upload.single('logo'), async (req, r
   if (!req.file) {
     return res.status(400).json({ error: 'logo file is required (field name "logo", png/jpeg/svg/webp, max 2MB)' });
   }
-  const settings = await saveBusinessSettings(req.businessId!, { logoPath: join(uploadsDir, req.file.filename) });
-  res.json({ ...settings, logoUrl: `/uploads/${req.file.filename}` });
+  // Content-sniffed from the actual bytes, never trusting the client's Content-Type header or
+  // filename extension - both are attacker-controlled and don't have to match the real content.
+  const sniffed = sniffImageType(req.file.buffer);
+  if (!sniffed) {
+    return res.status(400).json({ error: 'file is not a recognized PNG/JPEG/WEBP/SVG image' });
+  }
+  // One canonical logo file per business - clear any stale file from a previous upload in a
+  // different format first, so old bytes never linger under a dead filename.
+  for (const ext of ['.png', '.jpg', '.webp', '.svg']) {
+    const stale = join(uploadsDir, `logo-${req.businessId}${ext}`);
+    if (existsSync(stale)) unlinkSync(stale);
+  }
+  const filename = `logo-${req.businessId}${extensionForImageType(sniffed)}`;
+  const logoPath = join(uploadsDir, filename);
+  writeFileSync(logoPath, req.file.buffer);
+  const settings = await saveBusinessSettings(req.businessId!, { logoPath });
+  res.json({ ...settings, logoUrl: `/uploads/${filename}` });
 });
 
 app.get('/api/quotes/:id/pdf', requireAuth, async (req, res) => {
@@ -895,7 +957,10 @@ app.get('/api/quotes/:id/pdf', requireAuth, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.sendFile(pdfPath);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'PDF generation failed' });
+    // err.message here can be a raw Puppeteer/filesystem error (has included internal detail
+    // like "Protocol error: Connection closed..." in practice) - log it server-side only.
+    console.error('PDF generation failed:', err);
+    res.status(500).json({ error: 'PDF generation failed' });
   }
 });
 
@@ -1032,6 +1097,8 @@ app.post('/api/quotes/:id/send-gmail', requireAuth, async (req, res) => {
   const loaded = await loadQuote(req.businessId!, req.params.id);
   if (!loaded) return res.status(404).json({ error: 'quote not found' });
 
+  const unknownFields = rejectUnknownFields(req.body, ['to', 'subject', 'body']);
+  if (unknownFields) return res.status(400).json({ error: unknownFields });
   const { to, subject, body } = req.body ?? {};
   if (!to || !subject || !body) {
     return res.status(400).json({ error: 'to, subject, and body are required' });
@@ -1100,11 +1167,17 @@ app.post('/api/quotes/:id/send-gmail', requireAuth, async (req, res) => {
 // Catch-all JSON error handler — required now that DB calls are async: express-async-errors
 // forwards rejected promises here instead of the request hanging with no response, which is
 // what would otherwise happen on Express 4.x with no error-handling middleware at all.
+//
+// err.message used to be sent straight to the client - for a pg error that can be the raw SQL
+// detail (constraint name, column name, sometimes a filesystem path for an ENOENT-style error).
+// Full detail (including the stack) is still logged server-side; the client only ever gets a
+// generic message plus a correlation id so a report can be matched back to the server log.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err);
+  const errorId = randomUUID();
+  console.error(`[${errorId}]`, err);
   if (res.headersSent) return;
-  res.status(500).json({ error: err instanceof Error ? err.message : 'internal server error' });
+  res.status(500).json({ error: 'internal server error', errorId });
 });
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5187;
