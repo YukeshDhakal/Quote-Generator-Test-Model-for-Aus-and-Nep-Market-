@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
 import multer from 'multer';
 import {
   AU_PROFILE,
@@ -131,6 +132,12 @@ const app = express();
 // of the real client, either lumping all users into one shared limit or disabling limiting
 // entirely. `1` trusts exactly that one hop's X-Forwarded-For entry, not the whole chain.
 app.set('trust proxy', 1);
+// Baseline security response headers - notably Strict-Transport-Security (HSTS), which the
+// frontend already sends but this API didn't: without it, a browser that's ever reached this
+// API over plain http:// (e.g. someone typing the bare domain) has no standing instruction to
+// always upgrade to https:// on its own, leaving a window for a downgrade/strip attack even
+// though force_https already redirects at the Fly proxy layer.
+app.use(helmet());
 app.use(cors({ origin: WEB_ORIGINS, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
