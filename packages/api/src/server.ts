@@ -52,6 +52,7 @@ import {
 } from './auth.js';
 import { findBlocklistedTerms } from './blocklist.js';
 import { getBusinessSettings, saveBusinessSettings, uploadsDir } from './business.js';
+import { assertTokenEncryptionKeyValid } from './crypto.js';
 import { pool, withTransaction } from './db.js';
 import { quotePdfFilename } from './filename.js';
 import { composeQuoteEmail, DEFAULT_BODY, sendComposedEmail } from './mail.js';
@@ -66,6 +67,28 @@ declare global {
       userId?: string;
       businessId?: string;
     }
+  }
+}
+
+// Fail fast on boot rather than running with `undefined` and failing confusingly on first use.
+// DATABASE_URL is unconditionally required - without it, pg's Pool silently falls back to
+// PGHOST/PGUSER-style defaults (or localhost) instead of erroring, which could even mean quietly
+// talking to the wrong database. GOOGLE_CLIENT_ID/SECRET stay optional by design (Google
+// sign-in/Gmail send cleanly disable themselves when absent - see isGoogleSignInConfigured/
+// isGmailSendConfigured), but if Gmail send IS configured, TOKEN_ENCRYPTION_KEY must be present
+// and well-formed too, or every send would crash on the first real attempt instead of at boot.
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL is not set. Copy packages/api/.env.example to .env and fill it in.');
+  process.exit(1);
+}
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  try {
+    assertTokenEncryptionKeyValid();
+  } catch (err) {
+    console.error(
+      `FATAL: Gmail send is configured (GOOGLE_CLIENT_ID/SECRET set) but TOKEN_ENCRYPTION_KEY is invalid: ${err instanceof Error ? err.message : err}`,
+    );
+    process.exit(1);
   }
 }
 

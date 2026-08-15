@@ -10,6 +10,12 @@ function getKey(): Buffer {
   return key;
 }
 
+/** Same validation as getKey(), exposed for the boot-time fail-fast check in server.ts - lets a
+ * malformed/missing key surface immediately on startup instead of on the first Gmail send. */
+export function assertTokenEncryptionKeyValid(): void {
+  getKey();
+}
+
 /** iv.tag.ciphertext, each base64, dot-joined - single TEXT column, no sub-columns needed. A
  * fresh random IV per call makes this safe to call repeatedly (e.g. on reconnect) with the same key. */
 export function encryptToken(plaintext: string): string {
