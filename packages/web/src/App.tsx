@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { AuthPage } from './pages/AuthPage'
@@ -31,8 +31,21 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** "/" is both the public marketing home page (what crawlers/OAuth verification/social-share
+ * bots see) and the entry point that redirects a logged-in user straight to /dashboard. Those
+ * two jobs conflict during SSR prerendering: `loading` from useAuth() never resolves server-side
+ * (effects don't run there), so without the `hydrated` gate below this would prerender as a bare
+ * "Loading…" spinner forever - exactly what Google's OAuth branding review flagged ("home page
+ * does not explain the purpose of your app"), and equally bad for real SEO/link-preview crawlers.
+ * `hydrated` starts false on both server and the client's first (pre-hydration) render - so they
+ * produce identical output (<LandingPage/>) and hydration doesn't mismatch - then flips true via
+ * the effect below on the client only, after which real auth state takes over as before. */
 function HomeRoute() {
   const { user, loading } = useAuth()
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
+
+  if (!hydrated) return <LandingPage />
   if (loading) return <LoadingScreen />
   if (user) return <Navigate to="/dashboard" replace />
   return <LandingPage />
