@@ -73,9 +73,28 @@ numbering — see `.claude/state/decisions.md`).
   the migrations directory before assuming a deployed feature's schema
   is actually there, especially after enabling a feature via secrets/env
   vars rather than through the normal deploy path.**
-  Not yet end-to-end verified via the actual browser (need a real login)
-  — confirm the "Connect Gmail" → consent screen → send round trip next
-  session if not already done.
+  **End-to-end verified working (2026-08-16)** by the user via the real
+  app: Connect Gmail → consent screen → real send all succeeded. Two more
+  fixes were needed to get there beyond the secrets/migration work above:
+  (1) the Gmail API itself was disabled on the Cloud project (separate
+  from the OAuth client/credentials) — enabled at
+  console.cloud.google.com/apis/library/gmail.googleapis.com; (2) the
+  `redirect_uri` Console change was flaky for a few minutes after saving
+  (Google's own edge-propagation delay, not a bug on our side) — retried
+  and it settled.
+  OAuth **branding verification** (removes the "Google hasn't verified
+  this app" warning for non-owner users) was also submitted this session:
+  added real `/privacy` and `/terms` pages (footer previously linked to
+  `#`), fixed a real bug where `/` prerendered as a stuck "Loading…"
+  spinner instead of the actual landing page (see App.tsx's `HomeRoute` -
+  `useAuth()`'s `loading` never resolves during SSR since effects don't
+  run server-side; gated on a client-only `hydrated` flag instead), added
+  a real logo (`packages/web/public/brand/logo-*.png`, rendered from the
+  actual `Logo.tsx` SVG via Puppeteer at exact sizes), and verified domain
+  ownership in Search Console (HTML-file method,
+  `public/googleccb41940e5c5152d.html`). Re-verification requested;
+  Google's typical turnaround is a few days - check back for the result,
+  don't assume it's cleared without confirming.
 - Domain `quoteengine.dev` is registered + DNS-hosted on Vercel
   (`vercel dns` CLI works for record changes, not just the registrar UI).
 
