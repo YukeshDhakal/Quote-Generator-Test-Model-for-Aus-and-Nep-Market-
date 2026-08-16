@@ -985,7 +985,14 @@ app.get('/api/quotes/:id/pdf', requireAuth, async (req, res) => {
 
   try {
     const pdfPath = await renderQuotePdf(loaded.quoteRow.id, html);
-    await pool.query('UPDATE quotes SET pdf_path = $1 WHERE id = $2', [pdfPath, loaded.quoteRow.id]);
+    // business_id is redundant here too (loadQuote already confirmed ownership above) but every
+    // other mutating quotes statement in this file filters on it directly as defense-in-depth —
+    // see the comment on the PUT /api/quotes/:id handler. This one had drifted from that pattern.
+    await pool.query('UPDATE quotes SET pdf_path = $1 WHERE id = $2 AND business_id = $3', [
+      pdfPath,
+      loaded.quoteRow.id,
+      req.businessId!,
+    ]);
     // Downloaded does not mean sent - a separate "Mark as sent" action records that explicitly.
     await pool.query(
       `INSERT INTO send_events (id, quote_id, business_id, method, sent_by, sent_at, outcome)
