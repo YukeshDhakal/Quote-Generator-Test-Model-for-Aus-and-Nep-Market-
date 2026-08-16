@@ -53,6 +53,29 @@ numbering — see `.claude/state/decisions.md`).
   `650496659289-...`, project number `650496659289`. Only requests
   non-sensitive scopes (email/profile via ID-token flow), so
   publishing needed no Google review and has no user cap.
+- **Gmail send** (2026-08-16): two-layer bug, both fixed.
+  Layer 1 (config): `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`,
+  `GMAIL_REDIRECT_URI`, `MAIL_MODE` were all missing from Fly secrets —
+  now set (`MAIL_MODE=gmail` for real sends, `GMAIL_REDIRECT_URI` →
+  `https://api.quoteengine.dev/api/auth/google/callback`, fresh
+  `TOKEN_ENCRYPTION_KEY`, `GOOGLE_CLIENT_SECRET` from the
+  `GOOGLE_CLIENT_ID` OAuth client).
+  Layer 2 (DB schema, the actual "internal server error" the user hit
+  after layer 1 was fixed): quoteengine-prod (Supabase project
+  `xhfbpuxbdpjhjanwbbyg`) was two migrations behind — `gmail_connections`
+  and `send_events` tables plus the `identifier_type`/`customer_identifier`
+  columns existed on quoteengine-dev but were never promoted to prod
+  (`0002_quote_delivery.sql`'s own header literally said "not applied to
+  prod"). Confirmed via Supabase `list_tables` before touching anything,
+  then applied `0002_quote_delivery.sql` and `0003_seller_identifier_selection.sql`
+  to prod. **General lesson: a Fly/Vercel deploy does NOT apply pending
+  Supabase migrations — check `list_tables` on quoteengine-prod against
+  the migrations directory before assuming a deployed feature's schema
+  is actually there, especially after enabling a feature via secrets/env
+  vars rather than through the normal deploy path.**
+  Not yet end-to-end verified via the actual browser (need a real login)
+  — confirm the "Connect Gmail" → consent screen → send round trip next
+  session if not already done.
 - Domain `quoteengine.dev` is registered + DNS-hosted on Vercel
   (`vercel dns` CLI works for record changes, not just the registrar UI).
 

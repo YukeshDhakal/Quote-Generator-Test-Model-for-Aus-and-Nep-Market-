@@ -64,6 +64,16 @@ const STATIC_ROUTES: RouteSeo[] = [
     description:
       "What's live, what's planned, and what's deliberately not on the roadmap for Quote Engine's multi-jurisdiction quote templates.",
   },
+  {
+    path: '/privacy',
+    title: 'Privacy Policy | Quote Engine',
+    description: 'How Quote Engine collects, stores, and uses your data, including Gmail gmail.send access.',
+  },
+  {
+    path: '/terms',
+    title: 'Terms of Service | Quote Engine',
+    description: 'The terms that apply to using Quote Engine to generate and send quotation documents.',
+  },
 ]
 
 const JURISDICTION_ROUTES: RouteSeo[] = LIVE_JURISDICTIONS.map((j) => {

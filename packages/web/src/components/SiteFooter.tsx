@@ -1,18 +1,17 @@
 import { Link } from 'react-router-dom'
 import { Logo } from './Logo'
 
-// Real, routed pages use react-router's <Link>. Privacy/Contact have no destination yet — a
+// Real, routed pages use react-router's <Link>. Contact has no destination yet — a
 // react-router <Link to="#"> resolves "#" relative to the current route (landing on whatever
-// page you're already on, not a harmless same-page anchor), so those stay plain <a> tags.
+// page you're already on, not a harmless same-page anchor), so that one stays a plain <a> tag.
 const ROUTED_LINKS = [
   { label: 'What We Do', href: '/what-we-do' },
   { label: 'Jurisdictions', href: '/jurisdictions' },
   { label: 'Roadmap', href: '/roadmap' },
+  { label: 'Privacy', href: '/privacy' },
+  { label: 'Terms', href: '/terms' },
 ]
-const PLACEHOLDER_LINKS = [
-  { label: 'Privacy', href: '#' },
-  { label: 'Contact', href: '#' },
-]
+const PLACEHOLDER_LINKS = [{ label: 'Contact', href: '#' }]
 
 export function SiteFooter() {
   return (

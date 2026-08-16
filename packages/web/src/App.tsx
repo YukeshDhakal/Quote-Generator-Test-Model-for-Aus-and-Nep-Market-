@@ -9,9 +9,11 @@ import { JurisdictionDetail } from './pages/JurisdictionDetail'
 import { JurisdictionsIndex } from './pages/JurisdictionsIndex'
 import { LandingPage } from './pages/LandingPage'
 import { NewQuote } from './pages/NewQuote'
+import { PrivacyPolicy } from './pages/PrivacyPolicy'
 import { QuoteDetail } from './pages/QuoteDetail'
 import { QuoteList } from './pages/QuoteList'
 import { Roadmap } from './pages/Roadmap'
+import { TermsOfService } from './pages/TermsOfService'
 import { WhatWeDo } from './pages/WhatWeDo'
 import { AuthProvider, useAuth } from './lib/auth-context'
 
@@ -51,6 +53,8 @@ function AppRoutes() {
       <Route path="/jurisdictions" element={<JurisdictionsIndex />} />
       <Route path="/jurisdictions/:slug" element={<JurisdictionDetail />} />
       <Route path="/roadmap" element={<Roadmap />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
 
       <Route path="/" element={<HomeRoute />} />
       <Route

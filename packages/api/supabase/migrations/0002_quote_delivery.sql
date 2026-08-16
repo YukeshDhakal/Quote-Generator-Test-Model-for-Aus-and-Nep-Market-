@@ -1,5 +1,9 @@
 -- Quote delivery feature: Download PDF (already existed) + Send via Gmail (new).
--- Run once against quoteengine-dev only for this feature - not applied to prod.
+-- Applied to quoteengine-dev at the time this was written, then NOT promoted to
+-- quoteengine-prod for weeks - the Gmail-send feature was later wired up and turned on in prod
+-- (secrets set, MAIL_MODE=gmail) without this migration ever running there, causing
+-- "relation gmail_connections/send_events does not exist" 500s in production. Applied to
+-- quoteengine-prod on 2026-08-16 to fix that. Both projects are now caught up through 0002.
 
 ALTER TABLE requests ADD COLUMN customer_email TEXT;
 
